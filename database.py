@@ -36,6 +36,11 @@ def init_db() -> None:
     with _lock, _get_conn() as conn:
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS bot_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT ''
+            );
+
             CREATE TABLE IF NOT EXISTS user_settings (
                 user_id           INTEGER PRIMARY KEY,
                 crf               INTEGER NOT NULL DEFAULT 23,
@@ -208,3 +213,38 @@ def get_stats() -> dict:
             "total_files":   total_files,
         }
 
+
+# ── Bot-wide settings (force-join channel, etc.) ──────────────────────────────
+
+def get_bot_setting(key: str, default: str = "") -> str:
+    """Return a bot-wide setting value, or *default* if not set."""
+    with _lock, _get_conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM bot_settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else default
+
+
+def set_bot_setting(key: str, value: str) -> None:
+    """Upsert a bot-wide setting."""
+    with _lock, _get_conn() as conn:
+        conn.execute(
+            "INSERT INTO bot_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+
+
+def get_force_join_channel() -> str:
+    """Return the force-join channel identifier, or '' if not set."""
+    return get_bot_setting("force_join_channel")
+
+
+def set_force_join_channel(channel: str) -> None:
+    """Persist the force-join channel identifier."""
+    set_bot_setting("force_join_channel", channel)
+
+
+def clear_force_join_channel() -> None:
+    """Remove the force-join channel requirement."""
+    set_bot_setting("force_join_channel", "")

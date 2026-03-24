@@ -1,6 +1,6 @@
 """
-Telegram File-Operations Bot
-============================
+Telegram File-Operations Bot  —  ⚡ Ab Bots
+============================================
 Allows users to select **multiple** file operations in a single session and
 process everything in one stretch.
 
@@ -34,9 +34,11 @@ import asyncio
 import logging
 import os
 import shutil
+import time
 from pathlib import Path
 
 from telegram import Document, Update, Video
+from telegram.error import Forbidden
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -105,6 +107,20 @@ SUBTITLE_EXTS = frozenset({".srt", ".ass", ".ssa", ".vtt"})
 FONT_EXTS     = frozenset({".ttf", ".otf"})
 IMAGE_EXTS    = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 AUDIO_EXTS    = frozenset({".mp3", ".aac", ".ogg", ".opus", ".wav", ".flac", ".m4a"})
+
+# ── Operation display names (used in progress messages) ───────────────────────
+_OP_DISPLAY: dict[str, str] = {
+    "merge":          "🔗 Merging videos",
+    "remove_streams": "🎵 Removing streams",
+    "remove_subs":    "📝 Removing subtitles",
+    "trim":           "✂️ Trimming video",
+    "replace_audio":  "🔄 Replacing audio",
+    "watermark":      "🖼 Adding watermark",
+    "hardsub":        "🎨 Burning subtitles (MLRE)",
+    "compress":       "🗜 Compressing video",
+    "extract_audio":  "🎶 Extracting audio",
+    "rename":         "✏️ Renaming file",
+}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -219,6 +235,122 @@ async def _download_tg_file(bot, file_id: str, dest: str) -> None:
     await tg_file.download_to_drive(dest)
 
 
+# ── Force-join helpers ─────────────────────────────────────────────────────────
+
+async def _check_force_join(user_id: int, bot) -> bool:
+    """
+    Return True if the user may proceed (either no force-join channel is set,
+    or the user is already a member).
+    """
+    channel = db.get_force_join_channel() or config.FORCE_JOIN_CHANNEL
+    if not channel:
+        return True
+    try:
+        member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
+        return member.status not in ("left", "kicked")
+    except Exception:
+        return True  # Cannot verify → allow access
+
+
+async def _send_join_required(update: Update,
+                               context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send the 'please join our channel' prompt."""
+    channel = db.get_force_join_channel() or config.FORCE_JOIN_CHANNEL
+    text = (
+        "⚠️ *Access Restricted*\n\n"
+        "You must join our channel before using this bot.\n\n"
+        "👇 Tap *Join Channel*, then send /start to continue.\n\n"
+        f"_— {config.BOT_BRAND}_"
+    )
+    if update.callback_query:
+        await update.callback_query.answer(
+            "⚠️ Please join our channel first!", show_alert=True
+        )
+    elif update.message:
+        msg = await update.message.reply_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=kb.force_join_keyboard(channel),
+        )
+        _schedule_delete(context, update, msg)
+
+
+async def _require_join(update: Update,
+                         context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    Check force-join. Returns True (and sends prompt) if user is *blocked*.
+    Returns False if user is allowed to continue.
+    """
+    user_id = update.effective_user.id if update.effective_user else 0
+    if await _check_force_join(user_id, context.bot):
+        return False
+    await _send_join_required(update, context)
+    return True
+
+
+# ── Progress-tracking helpers ──────────────────────────────────────────────────
+
+def _count_processing_steps(ops: set, sess: dict) -> int:
+    """Return the number of FFmpeg operations that will actually run."""
+    count = 0
+    if "merge"          in ops and sess.get("merge_local_path"):    count += 1
+    if "remove_streams" in ops and sess.get("streams_to_remove"):   count += 1
+    if "remove_subs"    in ops:                                      count += 1
+    if "trim"           in ops and sess.get("trim_start"):           count += 1
+    if "replace_audio"  in ops and sess.get("replace_audio_path"):  count += 1
+    if "watermark"      in ops and sess.get("watermark_path"):       count += 1
+    if "hardsub"        in ops and sess.get("subtitle_file_path"):
+        count += 1
+    elif "compress"     in ops:
+        count += 1
+    if "extract_audio"  in ops:                                      count += 1
+    if "rename"         in ops and sess.get("rename_to"):            count += 1
+    return max(1, count)
+
+
+def _build_progress_text(progress: dict) -> str:
+    """Format a rich progress message from a shared progress dict."""
+    step    = progress.get("step", 0)
+    total   = progress.get("total", 1)
+    op_name = progress.get("op", "Starting…")
+    elapsed = time.time() - progress.get("start", time.time())
+
+    pct    = min(99, int(100 * step / max(1, total)))
+    filled = pct // 10
+    bar    = "█" * filled + "░" * (10 - filled)
+
+    mins = int(elapsed) // 60
+    secs = int(elapsed) % 60
+
+    spinners = ["🔄", "⚙️", "⏳", "🔃"]
+    spin = spinners[int(elapsed / 2) % len(spinners)]
+
+    return (
+        f"⚙️ *Processing your video…*\n\n"
+        f"📊 `{bar}` {pct}%\n"
+        f"{spin} *{op_name}*\n"
+        f"⏱ Elapsed: `{mins:02d}:{secs:02d}`\n"
+        f"📋 Steps: `{step} / {total}`\n\n"
+        f"_— {config.BOT_BRAND}_"
+    )
+
+
+async def _progress_updater(status_msg,
+                              progress: dict,
+                              stop_event: asyncio.Event) -> None:
+    """Periodically edit *status_msg* with live progress info."""
+    while not stop_event.is_set():
+        await asyncio.sleep(4)
+        if stop_event.is_set():
+            break
+        try:
+            await status_msg.edit_text(
+                _build_progress_text(progress), parse_mode="Markdown"
+            )
+        except Exception:
+            pass  # message may already be deleted / unchanged
+
+
 async def _download_video(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -252,22 +384,42 @@ async def _download_video(
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_allowed(update.effective_user.id):
         return
-    db.record_user(update.effective_user.id,
+    user_id = update.effective_user.id
+    db.record_user(user_id,
                    update.effective_user.username or "",
                    update.effective_user.first_name or "")
-    msg = await update.message.reply_text(
-        "👋 *Video Processing Bot*\n\n"
-        "Send me any *video file* and choose from:\n"
+
+    # Check force-join but always show the welcome (include join button if needed)
+    channel = db.get_force_join_channel() or config.FORCE_JOIN_CHANNEL
+    has_joined = await _check_force_join(user_id, context.bot)
+
+    first_name = update.effective_user.first_name or "there"
+    body = (
+        f"👋 *Welcome, {first_name}!*\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🤖 *{config.BOT_BRAND} — Video Processor*\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Send me any *video file* and choose from:\n\n"
         "  🗜 Compress  •  📝 Remove Subs  •  🎵 Remove Streams\n"
         "  🎨 Hardsub (MLRE)  •  ✂️ Trim  •  🎶 Extract Audio\n"
         "  🔄 Replace Audio  •  🖼 Watermark  •  ✏️ Rename  •  🔗 Merge\n\n"
-        "Select *multiple* operations at once — all run in one pass.\n\n"
-        "📌 *Results are always sent to your PM.*\n"
-        "🎨 Upload any `.ttf`/`.otf` file to set a custom hardsub font.\n\n"
-        "/settings – compression & encoding settings\n"
-        "/setfont  – manage custom rendering font",
-        parse_mode="Markdown",
+        "✨ Select *multiple* operations — processed in one pass.\n\n"
+        "📌 Results are always sent to your *PM*.\n"
+        "🎨 Upload any `.ttf`/`.otf` file for a custom hardsub font.\n\n"
+        "⚙️ /settings  —  encoding preferences\n"
+        "🎨 /setfont   —  manage rendering font\n\n"
+        f"_— Powered by {config.BOT_BRAND}_"
     )
+
+    if channel and not has_joined:
+        body += "\n\n⚠️ *You must join our channel to use the bot!*"
+        msg = await update.message.reply_text(
+            body,
+            parse_mode="Markdown",
+            reply_markup=kb.force_join_keyboard(channel),
+        )
+    else:
+        msg = await update.message.reply_text(body, parse_mode="Markdown")
     _schedule_delete(context, update, msg)
 
 
@@ -387,6 +539,44 @@ async def cmd_clearfont(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # Admin commands
 # ══════════════════════════════════════════════════════════════════════════════
 
+async def cmd_setforcejoin(update: Update,
+                            context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Set the force-join channel. Usage: /setforcejoin @channel or invite link."""
+    if not _is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Admin only.")
+        return
+    if not context.args:
+        current = db.get_force_join_channel() or config.FORCE_JOIN_CHANNEL or "_(not set)_"
+        await update.message.reply_text(
+            f"📢 *Force-Join Channel*\n\nCurrent: `{current}`\n\n"
+            "Usage: `/setforcejoin @yourchannel`\n"
+            "or:    `/setforcejoin https://t.me/joinchat/...`",
+            parse_mode="Markdown",
+        )
+        return
+    channel = context.args[0]
+    db.set_force_join_channel(channel)
+    await update.message.reply_text(
+        f"✅ Force-join channel set to `{channel}`.\n\n"
+        "Users must now join that channel before using the bot.",
+        parse_mode="Markdown",
+    )
+    _tg_log("INFO", f"Force-join channel set: {channel}", update)
+
+
+async def cmd_removeforcejoin(update: Update,
+                               context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Remove the force-join channel requirement."""
+    if not _is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Admin only.")
+        return
+    db.clear_force_join_channel()
+    await update.message.reply_text(
+        "✅ Force-join requirement removed. All users can now use the bot freely.",
+    )
+    _tg_log("INFO", "Force-join channel cleared", update)
+
+
 async def cmd_addpremium(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ Admin only.")
@@ -481,6 +671,8 @@ async def cmd_broadcast(update: Update,
 
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_allowed(update.effective_user.id):
+        return
+    if await _require_join(update, context):
         return
 
     user_id = update.effective_user.id

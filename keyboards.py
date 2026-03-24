@@ -171,3 +171,16 @@ def watermark_position_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("❌ Cancel",         callback_data="cancel")],
     ])
 
+
+# ── Force-join keyboard ────────────────────────────────────────────────────────
+
+def force_join_keyboard(channel: str) -> InlineKeyboardMarkup:
+    """Single 'Join Channel' button that links to *channel*."""
+    if channel.startswith("http"):
+        url = channel
+    else:
+        url = f"https://t.me/{channel.lstrip('@')}"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📢 Join Channel", url=url),
+    ]])
+
