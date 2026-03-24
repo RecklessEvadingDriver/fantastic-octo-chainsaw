@@ -41,6 +41,14 @@ SPLIT_THRESHOLD_MB: int = int(os.environ.get("SPLIT_THRESHOLD_MB", "2000"))
 # Size of each split part (should be ≤ SPLIT_THRESHOLD_MB)
 SPLIT_PART_SIZE_MB: int = int(os.environ.get("SPLIT_PART_SIZE_MB", "1950"))
 
+# ----- Ab Bots branding -----
+BOT_BRAND: str = "⚡ Ab Bots"
+
+# ----- Force-join channel -----
+# Set to a channel username (e.g. @mychannel) or invite link so that users must
+# join before they can interact with the bot.  Leave empty to disable.
+FORCE_JOIN_CHANNEL: str = os.environ.get("FORCE_JOIN_CHANNEL", "")
+
 # ----- Group message auto-delete -----
 # Bot messages sent in group/supergroup chats are deleted after this many seconds.
 # Set to 0 to disable auto-deletion. Does NOT affect PM messages.
