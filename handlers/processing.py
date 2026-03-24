@@ -21,7 +21,7 @@ import tg_logger as tgl
 from sessions import _active_tasks, ST_PROCESSING, ST_WAIT_STREAM, ST_WAIT_SUBTITLE
 from sessions import ST_WAIT_RENAME, ST_WAIT_MERGE, ST_WAIT_WATERMARK
 from sessions import ST_WAIT_REPLACE_AUD, ST_WAIT_TRIM, ST_WAIT_AUDIO_FMT
-from utils.helpers import clear_session, schedule_delete, tg_log
+from utils.helpers import clear_session, schedule_delete, tg_log, fmt_size
 from utils.progress import OP_DISPLAY, count_steps, build_progress_text, progress_updater
 import keyboards as kb
 
@@ -175,6 +175,9 @@ async def start_processing(update: Update,
     stop_event.set()
     await updater_task
 
+    elapsed_secs = int(time.time() - progress["start"])
+    elapsed_str  = f"{elapsed_secs // 60:02d}:{elapsed_secs % 60:02d}"
+
     # ── Deliver results to user's PM ───────────────────────────────────────────
     try:
         await status_msg.edit_text("📤 Sending result to your PM…")
@@ -187,8 +190,14 @@ async def start_processing(update: Update,
     delivered   = 0
 
     for i, out_path in enumerate(output_files):
-        part_label = f"Part {i + 1}/{total_parts}\n" if total_parts > 1 else ""
-        caption    = f"✅ {part_label}Operations: {ops_caption}\n\n_— {config.BOT_BRAND}_"
+        part_label  = f"Part {i + 1}/{total_parts}\n" if total_parts > 1 else ""
+        file_size   = fmt_size(os.path.getsize(out_path))
+        caption     = (
+            f"✅ {part_label}"
+            f"📋 *Operations:* {ops_caption}\n"
+            f"📦 *Size:* `{file_size}`  •  ⏱ *Time:* `{elapsed_str}`\n\n"
+            f"_— {config.BOT_BRAND}_"
+        )
         fname      = (
             f"{final_base}.part{i + 1:03d}{Path(out_path).suffix}"
             if total_parts > 1

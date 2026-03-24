@@ -39,13 +39,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "Send me any *video file* and choose from:\n\n"
         "  🗜 Compress  •  📝 Remove Subs  •  🎵 Remove Streams\n"
-        "  🎨 Hardsub (MLRE)  •  ✂️ Trim  •  🎶 Extract Audio\n"
+        "  🎨 Hardsub (Burn Subs)  •  ✂️ Trim  •  🎶 Extract Audio\n"
         "  🔄 Replace Audio  •  🖼 Watermark  •  ✏️ Rename  •  🔗 Merge\n\n"
         "✨ Select *multiple* operations — processed in one pass.\n\n"
         "📌 Results are always sent to your *PM*.\n"
         "🎨 Upload any `.ttf`/`.otf` file for a custom hardsub font.\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
         "⚙️ /settings  —  encoding preferences\n"
-        "🎨 /setfont   —  manage rendering font\n\n"
+        "🎨 /setfont   —  manage rendering font\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"_— Powered by {config.BOT_BRAND}_"
     )
 
@@ -70,13 +72,16 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     s = db.get_settings(user_id)
     font_name = Path(s["custom_font_path"]).name if s.get("custom_font_path") else "none"
     text = (
-        "⚙️ *Current Settings*\n\n"
-        f"  • CRF: `{s['crf']}`\n"
-        f"  • Resolution: `{s['resolution']}`\n"
-        f"  • Preset: `{s['preset']}`\n"
-        f"  • Codec: `{s['codec']}`\n"
-        f"  • Font: `{font_name}`\n\n"
-        "These settings are saved and used automatically every time you compress or hardsub."
+        "⚙️ *Current Settings*\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"  🔢 CRF:        `{s['crf']}`\n"
+        f"  📐 Resolution: `{s['resolution']}`\n"
+        f"  ⚡ Preset:     `{s['preset']}`\n"
+        f"  🎬 Codec:      `{s['codec']}`\n"
+        f"  🎨 Font:       `{font_name}`\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "_These settings are saved and applied automatically\n"
+        "for every Compress & Hardsub operation._"
     )
     await update.message.reply_text(text, parse_mode="Markdown",
                                     reply_markup=kb.settings_menu())

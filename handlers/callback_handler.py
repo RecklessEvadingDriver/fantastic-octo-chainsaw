@@ -12,8 +12,7 @@ import config
 import database as db
 import keyboards as kb
 from sessions import ST_PROCESSING, ST_SELECTING, ST_WAIT_STREAM
-from utils.helpers import is_allowed, get_session, clear_session, schedule_delete
-from utils.force_join import require_join
+from utils.helpers import is_allowed, get_session, clear_session, schedule_deletefrom utils.force_join import require_join
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +20,9 @@ logger = logging.getLogger(__name__)
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
+
+    if not is_allowed(update.effective_user.id):
+        return
 
     if await require_join(update, context):
         return
@@ -58,13 +60,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         s  = db.get_settings(user_id)
         fn = Path(s["custom_font_path"]).name if s.get("custom_font_path") else "none"
         text = (
-            "⚙️ *Current Settings*\n\n"
-            f"  • CRF: `{s['crf']}`\n"
-            f"  • Resolution: `{s['resolution']}`\n"
-            f"  • Preset: `{s['preset']}`\n"
-            f"  • Codec: `{s['codec']}`\n"
-            f"  • Font: `{fn}`\n\n"
-            "Saved and used for every Compress & Hardsub operation."
+            "⚙️ *Current Settings*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"  🔢 CRF:        `{s['crf']}`\n"
+            f"  📐 Resolution: `{s['resolution']}`\n"
+            f"  ⚡ Preset:     `{s['preset']}`\n"
+            f"  🎬 Codec:      `{s['codec']}`\n"
+            f"  🎨 Font:       `{fn}`\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "_Saved and applied for every Compress & Hardsub operation._"
         )
         await query.edit_message_text(
             text, parse_mode="Markdown", reply_markup=kb.settings_menu()
@@ -97,13 +101,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         s  = db.get_settings(user_id)
         fn = Path(s["custom_font_path"]).name if s.get("custom_font_path") else "none"
         text = (
-            f"✅ *{key.capitalize()}* → `{value}`\n\n"
-            "⚙️ *Settings*\n\n"
-            f"  • CRF: `{s['crf']}`\n"
-            f"  • Resolution: `{s['resolution']}`\n"
-            f"  • Preset: `{s['preset']}`\n"
-            f"  • Codec: `{s['codec']}`\n"
-            f"  • Font: `{fn}`"
+            f"✅ *{key.capitalize()}* updated to `{value}`\n\n"
+            "⚙️ *Current Settings*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"  🔢 CRF:        `{s['crf']}`\n"
+            f"  📐 Resolution: `{s['resolution']}`\n"
+            f"  ⚡ Preset:     `{s['preset']}`\n"
+            f"  🎬 Codec:      `{s['codec']}`\n"
+            f"  🎨 Font:       `{fn}`\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "_Saved and applied for every Compress & Hardsub operation._"
         )
         await query.edit_message_text(
             text, parse_mode="Markdown", reply_markup=kb.settings_menu()
@@ -141,7 +148,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     sess = get_session(user_id)
     if not sess:
         await query.edit_message_text(
-            "⚠️ Session expired. Please send your video again."
+            "⚠️ Session expired or not found. Please send your video again to start a new session."
         )
         return
 
@@ -162,7 +169,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if data == "cancel":
         clear_session(user_id)
-        await query.edit_message_text("❌ Cancelled. Send a new video when ready.")
+        await query.edit_message_text("❌ Operation cancelled. Send a new video whenever you're ready.")
         return
 
     if data == "process":

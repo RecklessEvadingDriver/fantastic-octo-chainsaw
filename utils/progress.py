@@ -15,7 +15,7 @@ OP_DISPLAY: dict[str, str] = {
     "trim":           "✂️ Trimming video",
     "replace_audio":  "🔄 Replacing audio",
     "watermark":      "🖼 Adding watermark",
-    "hardsub":        "🎨 Burning subtitles (MLRE)",
+    "hardsub":        "🎨 Burning subtitles (Hardsub)",
     "compress":       "🗜 Compressing video",
     "extract_audio":  "🎶 Extracting audio",
     "rename":         "✏️ Renaming file",
