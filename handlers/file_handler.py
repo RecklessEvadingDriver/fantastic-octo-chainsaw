@@ -136,9 +136,10 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     sess["local_path"]   = local_path
     sess["streams_info"] = await asyncio.to_thread(ff.probe_streams, local_path)
 
+    file_size = fmt_size(os.path.getsize(local_path))
     menu_msg = await update.message.reply_text(
-        f"📁 *{original_name}*\n\n"
-        "Select the operations you want to apply, then press ▶️ Process Now.\n"
+        f"📁 *{original_name}*  •  `{file_size}`\n\n"
+        "Select the operations you want to apply, then press ▶️ *Process Now*.\n"
         "_Results will be sent to your PM._",
         parse_mode="Markdown",
         reply_markup=kb.operation_menu(sess["selected_ops"]),

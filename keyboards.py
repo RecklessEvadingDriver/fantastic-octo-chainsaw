@@ -144,12 +144,12 @@ def audio_format_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🎵 MP3",  callback_data="audioformat:mp3"),
-            InlineKeyboardButton("🎵 AAC",  callback_data="audioformat:aac"),
-            InlineKeyboardButton("🎵 OPUS", callback_data="audioformat:opus"),
+            InlineKeyboardButton("🔊 AAC",  callback_data="audioformat:aac"),
+            InlineKeyboardButton("🌀 OPUS", callback_data="audioformat:opus"),
         ],
         [
-            InlineKeyboardButton("🎵 FLAC", callback_data="audioformat:flac"),
-            InlineKeyboardButton("🎵 WAV",  callback_data="audioformat:wav"),
+            InlineKeyboardButton("🎼 FLAC", callback_data="audioformat:flac"),
+            InlineKeyboardButton("📻 WAV",  callback_data="audioformat:wav"),
         ],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel")],
     ])
@@ -164,8 +164,8 @@ def watermark_position_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton("↗ Top-Right",   callback_data="wmpos:topright"),
         ],
         [
-            InlineKeyboardButton("↙ Bot-Left",    callback_data="wmpos:bottomleft"),
-            InlineKeyboardButton("↘ Bot-Right",   callback_data="wmpos:bottomright"),
+            InlineKeyboardButton("↙ Bottom-Left",    callback_data="wmpos:bottomleft"),
+            InlineKeyboardButton("↘ Bottom-Right",   callback_data="wmpos:bottomright"),
         ],
         [InlineKeyboardButton("⊙ Center",         callback_data="wmpos:center")],
         [InlineKeyboardButton("❌ Cancel",         callback_data="cancel")],
