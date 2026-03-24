@@ -1,92 +1,90 @@
-# 🎬 Telegram File-Operations Bot
+# Telegram Video-Processing Bot
 
-A Telegram bot that lets you select **multiple file operations at once** and process them all in a single pass — no repeated uploads, no manual FFmpeg commands.
+A feature-rich Telegram bot for video processing, deployable on Heroku.
+Results are delivered to the user's **private chat (PM)**; group messages auto-delete after 30 s.
+
+---
 
 ## Features
 
 | Operation | Description |
-|-----------|-------------|
-| 🗜 **Compress** | Re-encode with your saved CRF, resolution, preset and codec. Works on any input including PreDVD sources. |
-| 📝 **Remove Subtitles** | Strip all subtitle streams from the file. |
-| 🎵 **Remove Streams** | Pick individual audio / video / subtitle streams to delete (interactive picker). |
-| ✏️ **Rename** | Rename the final output file. |
-| 🔗 **Merge** | Concatenate two files into one (no re-encoding). |
+|---|---|
+| Compress | Re-encode with CRF / preset / codec / resolution |
+| Remove Subtitles | Strip all soft subtitle streams |
+| Remove Streams | Choose individual streams to drop |
+| Hardsub (MLRE) | Burn subtitles into video pixels; supports custom fonts |
+| Trim | Cut to a start/end time range |
+| Extract Audio | Export audio as MP3 / AAC / OPUS / FLAC / WAV |
+| Replace Audio | Swap the audio track with another file |
+| Watermark | Overlay a PNG/JPG image |
+| Rename | Rename the output file |
+| Merge | Concatenate with a second video |
 
-All selected operations are applied in a single stretch, in the order: **Merge → Remove Streams → Remove Subtitles → Compress → Rename**.
+### Admin features
+- `/addpremium <user_id>` - grant premium
+- `/removepremium <user_id>` - revoke premium
+- `/listpremium` - list all premium users
+- `/stats` - usage statistics
+- `/broadcast <msg>` - message all users
 
-## Requirements
+### Reliability
+- **One task per user** - prevents overload
+- **Auto file splitting** - files over `SPLIT_THRESHOLD_MB` are split and sent as parts
+- **Group auto-delete** - bot replies in groups deleted after `AUTO_DELETE_GROUP_SECONDS`
+- **TG logs channel** - set `LOG_CHANNEL_ID` for structured activity logs
 
-- Python 3.11+
-- FFmpeg & FFprobe installed and available on `$PATH`
+---
 
-## Setup
+## Heroku Deployment
 
-```bash
-# 1. Clone the repo and install dependencies
-pip install -r requirements.txt
+1. Add buildpacks:
+   ```
+   heroku buildpacks:add --index 1 https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest.git
+   heroku buildpacks:add heroku/python
+   ```
 
-# 2. Set your bot token (from @BotFather)
-export BOT_TOKEN="123456:ABCdef..."
+2. Set config vars:
+   ```bash
+   heroku config:set BOT_TOKEN=...
+   heroku config:set ADMIN_IDS=123456789
+   heroku config:set LOG_CHANNEL_ID=-1001234567890
+   heroku config:set AUTO_DELETE_GROUP_SECONDS=30
+   heroku config:set SPLIT_THRESHOLD_MB=2000
+   ```
 
-# 3. Run the bot
-python bot.py
-```
+3. Deploy and scale:
+   ```bash
+   git push heroku main
+   heroku ps:scale worker=1
+   ```
 
-You can also set `BOT_TOKEN` directly in `config.py`.
+---
 
-## Bot Commands
+## User Commands
 
 | Command | Description |
-|---------|-------------|
-| `/start` | Welcome message |
-| `/settings` | Open persistent settings panel (CRF, resolution, preset, codec) |
-| `/setcrf <value>` | Quickly set CRF (0–51, lower = better quality; e.g. `/setcrf 18`) |
-| `/setres <value>` | Set output resolution (e.g. `/setres 720p` or `/setres 1280x720`) |
+|---|---|
+| `/start` | Help message |
+| `/settings` | View/edit encoding settings |
+| `/setcrf <0-51>` | Set CRF quality |
+| `/setres <res>` | Set resolution (720p, 1080p, 1280x720, ...) |
+| `/setfont` | View custom font info |
+| `/clearfont` | Remove saved custom font |
 
-## Usage
+Upload any `.ttf` or `.otf` file to set it as your hardsub rendering font.
 
-1. Send any video or document to the bot.
-2. An inline menu appears — tap to **toggle** any combination of operations.
-3. Press **▶️ Process Now**.
-   - If **Remove Streams** is selected, the bot shows a per-stream picker first.
-   - If **Rename** is selected, the bot asks for the new filename.
-   - If **Merge** is selected, the bot asks you to send the second file.
-4. The bot processes everything and sends back the result.
+---
 
-## Compression Settings
+## Environment Variables
 
-Compression settings are **saved per user** and reused automatically — you never need to type FFmpeg flags.
+See `.env.example` for a full documented list.
 
-| Setting | Default | How to change |
-|---------|---------|---------------|
-| CRF | 23 | `/setcrf 18` or via `/settings` |
-| Resolution | original | `/setres 720p` or via `/settings` |
-| Preset | medium | via `/settings` |
-| Codec | libx264 | via `/settings` (libx264 / libx265 / libvpx-vp9) |
-
-## Configuration
-
-All configurable values live in `config.py`:
-
-```python
-BOT_TOKEN          = "..."       # or set via env var
-ALLOWED_USER_IDS   = []          # empty = open to all users
-DOWNLOAD_DIR       = "downloads"
-OUTPUT_DIR         = "outputs"
-DATABASE_PATH      = "bot_data.db"
-DEFAULT_CRF        = 23
-DEFAULT_PRESET     = "medium"
-DEFAULT_CODEC      = "libx264"
-DEFAULT_RESOLUTION = "original"
-```
-
-## Project Structure
-
-```
-bot.py           Main entry point — all Telegram handlers
-config.py        Configuration variables
-database.py      SQLite-backed user settings
-ffmpeg_utils.py  FFmpeg / FFprobe wrappers
-keyboards.py     Inline keyboard builders
-requirements.txt Python dependencies
-```
+| Variable | Default | Description |
+|---|---|---|
+| `BOT_TOKEN` | - | **Required** Telegram bot token |
+| `ADMIN_IDS` | `` | Comma-separated admin user IDs |
+| `LOG_CHANNEL_ID` | `0` | Channel/group for TG logs (0 = disabled) |
+| `ALLOWED_USER_IDS` | `` | Whitelist (empty = open to all) |
+| `SPLIT_THRESHOLD_MB` | `2000` | Split files larger than this |
+| `SPLIT_PART_SIZE_MB` | `1950` | Size of each split part |
+| `AUTO_DELETE_GROUP_SECONDS` | `30` | Group message TTL (0 = disabled) |
