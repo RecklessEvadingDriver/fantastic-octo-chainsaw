@@ -11,9 +11,15 @@ BOT_TOKEN: str = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 ALLOWED_USER_IDS: list[int] = []   # e.g. [123456789, 987654321]
 ADMIN_IDS: list[int] = []          # future admin commands
 
+# ----- Telegram logs channel -----
+# Set to a channel/group ID (negative for groups, e.g. -1001234567890).
+# Leave as 0 to disable TG logging.
+LOG_CHANNEL_ID: int = int(os.environ.get("LOG_CHANNEL_ID", "0"))
+
 # ----- Working directories -----
 DOWNLOAD_DIR: str = os.environ.get("DOWNLOAD_DIR", "downloads")
 OUTPUT_DIR: str = os.environ.get("OUTPUT_DIR", "outputs")
+FONTS_DIR: str = os.environ.get("FONTS_DIR", "fonts")   # per-user custom fonts
 
 # ----- SQLite database path -----
 DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "bot_data.db")

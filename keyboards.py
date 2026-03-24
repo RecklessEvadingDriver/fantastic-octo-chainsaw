@@ -18,6 +18,7 @@ OPERATIONS = {
     "compress":        "🗜 Compress",
     "remove_subs":     "📝 Remove Subtitles",
     "remove_streams":  "🎵 Remove Streams",
+    "hardsub":         "🎨 Hardsub (Burn Subs)",
     "rename":          "✏️ Rename",
     "merge":           "🔗 Merge",
 }
@@ -66,7 +67,8 @@ def settings_menu() -> InlineKeyboardMarkup:
                 InlineKeyboardButton("⚡ Set Preset",      callback_data="cfg:preset"),
                 InlineKeyboardButton("🎬 Set Codec",       callback_data="cfg:codec"),
             ],
-            [InlineKeyboardButton("« Back", callback_data="cfg:back")],
+            [InlineKeyboardButton("🎨 Manage Font",        callback_data="cfg:font")],
+            [InlineKeyboardButton("« Back",                callback_data="cfg:back")],
         ]
     )
 

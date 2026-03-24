@@ -29,6 +29,19 @@ def _run(cmd: list[str]) -> None:
         raise RuntimeError(stderr)
 
 
+def _ffmpeg_escape(path: str) -> str:
+    """
+    Escape a filesystem path for use inside an FFmpeg filter-graph string.
+
+    The path is wrapped in single-quotes by the caller; only the characters
+    that are special inside FFmpeg's filter syntax need escaping.
+    """
+    path = path.replace("\\", "/")          # normalise to forward slashes
+    for ch in ("'", ":", ",", "[", "]", ";"):
+        path = path.replace(ch, "\\" + ch)
+    return path
+
+
 # ── Compress ───────────────────────────────────────────────────────────────────
 
 def compress_video(
@@ -163,3 +176,63 @@ def probe_streams(input_path: str) -> list[dict]:
         return []
     data = _json.loads(result.stdout or "{}")
     return data.get("streams", [])
+
+
+# ── Hardsub (Multi-Language Rendering Engine) ──────────────────────────────────
+
+def hardsub_video(
+    input_path: str,
+    output_path: str,
+    subtitle_path: str,
+    font_path: str | None = None,
+    crf: int = 23,
+    preset: str = "medium",
+    codec: str = "libx264",
+) -> str:
+    """
+    Burn (hardsub) subtitles into the video — the MLRE operation.
+
+    Supports .srt, .ass, and .ssa subtitle formats.  When *font_path* is
+    provided the custom font is used for rendering (works for both ASS and
+    SRT inputs).  The video is re-encoded with the given quality settings.
+
+    Parameters
+    ----------
+    input_path    : Source video file.
+    output_path   : Destination file.
+    subtitle_path : Subtitle file (.srt / .ass / .ssa).
+    font_path     : Optional .ttf / .otf font file for rendering.
+    crf           : CRF value for the re-encode (0–51).
+    preset        : FFmpeg encoding preset.
+    codec         : Video codec (libx264 recommended for hardsub).
+    """
+    ext = Path(subtitle_path).suffix.lower()
+    esc_sub = _ffmpeg_escape(subtitle_path)
+
+    if ext in (".ass", ".ssa"):
+        # ASS/SSA: use the native ass filter which supports fontsdir
+        if font_path:
+            font_dir = _ffmpeg_escape(str(Path(font_path).parent))
+            vf = f"ass='{esc_sub}':fontsdir='{font_dir}'"
+        else:
+            vf = f"ass='{esc_sub}'"
+    else:
+        # SRT / VTT → use the generic subtitles filter with optional font override
+        if font_path:
+            font_name = _ffmpeg_escape(Path(font_path).stem)
+            vf = (
+                f"subtitles='{esc_sub}':fontsdir='{_ffmpeg_escape(str(Path(font_path).parent))}':"
+                f"force_style='Fontname={font_name}'"
+            )
+        else:
+            vf = f"subtitles='{esc_sub}'"
+
+    cmd = [
+        "ffmpeg", "-y", "-i", input_path,
+        "-vf", vf,
+        "-c:v", codec, "-crf", str(crf), "-preset", preset,
+        "-c:a", "copy",
+        output_path,
+    ]
+    _run(cmd)
+    return output_path

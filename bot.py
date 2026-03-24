@@ -9,6 +9,7 @@ Supported operations
   • 🗜  Compress     – re-encode with saved CRF / resolution / preset / codec
   • 📝  Remove Subs  – strip all subtitle streams
   • 🎵  Remove Streams – remove selected audio/video/subtitle streams
+  • 🎨  Hardsub (MLRE) – burn subtitles into video with optional custom font
   • ✏️   Rename       – rename the output file
   • 🔗  Merge        – concatenate with a second video
 
@@ -17,14 +18,16 @@ Usage
 1.  Send any video / document to the bot.
 2.  Toggle the operations you want with the inline buttons.
 3.  Press ▶️ Process Now – the bot will ask for any extra input
-    (new name, second file, streams to remove) and then run everything
-    in one go.
+    (subtitle file, new name, second file, streams to remove) and then run
+    everything in one go.
 
 Settings
 --------
 /settings  – open the persistent settings panel (CRF, resolution, preset, codec)
 /setcrf    – quickly change CRF  (e.g. /setcrf 18)
 /setres    – quickly change resolution (e.g. /setres 720p or /setres 1280x720)
+/setfont   – show current font status (upload .ttf/.otf to set a custom font)
+/clearfont – remove saved custom font
 """
 
 import asyncio
@@ -47,6 +50,7 @@ import config
 import database as db
 import ffmpeg_utils as ff
 import keyboards as kb
+import tg_logger as tgl
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -58,6 +62,7 @@ logger = logging.getLogger(__name__)
 # ── Ensure working directories exist ──────────────────────────────────────────
 os.makedirs(config.DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+os.makedirs(config.FONTS_DIR, exist_ok=True)
 
 # ── In-memory session store ────────────────────────────────────────────────────
 # Structure per user_id:
@@ -72,17 +77,24 @@ os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 #   "merge_local_path"     : str   – local path of the second file
 #   "streams_info"         : list  – result of ffprobe
 #   "streams_to_remove"    : set   – stream indices to remove
+#   "subtitle_file_path"   : str   – local path of uploaded subtitle file
+#   "subtitle_file_name"   : str   – original subtitle filename
 #   "state"                : str   – current conversation state
 #   "menu_message_id"      : int   – message id of the operation-menu message
 # }
 _sessions: dict[int, dict] = {}
 
 # ── State constants ────────────────────────────────────────────────────────────
-ST_SELECTING   = "selecting"
-ST_WAIT_RENAME = "wait_rename"
-ST_WAIT_MERGE  = "wait_merge"
-ST_WAIT_STREAM = "wait_stream"
-ST_PROCESSING  = "processing"
+ST_SELECTING    = "selecting"
+ST_WAIT_RENAME  = "wait_rename"
+ST_WAIT_MERGE   = "wait_merge"
+ST_WAIT_STREAM  = "wait_stream"
+ST_WAIT_SUBTITLE = "wait_subtitle"
+ST_PROCESSING   = "processing"
+
+# ── File extension sets ────────────────────────────────────────────────────────
+SUBTITLE_EXTS = frozenset({".srt", ".ass", ".ssa", ".vtt"})
+FONT_EXTS     = frozenset({".ttf", ".otf"})
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -93,18 +105,20 @@ def _session(user_id: int) -> dict | None:
 
 def _new_session(user_id: int, file_id: str, file_name: str) -> dict:
     _sessions[user_id] = {
-        "file_id":           file_id,
-        "file_name":         file_name,
-        "local_path":        "",
-        "selected_ops":      set(),
-        "rename_to":         None,
-        "merge_file_id":     None,
-        "merge_file_name":   None,
-        "merge_local_path":  "",
-        "streams_info":      [],
-        "streams_to_remove": set(),
-        "state":             ST_SELECTING,
-        "menu_message_id":   None,
+        "file_id":             file_id,
+        "file_name":           file_name,
+        "local_path":          "",
+        "selected_ops":        set(),
+        "rename_to":           None,
+        "merge_file_id":       None,
+        "merge_file_name":     None,
+        "merge_local_path":    "",
+        "streams_info":        [],
+        "streams_to_remove":   set(),
+        "subtitle_file_path":  None,
+        "subtitle_file_name":  None,
+        "state":               ST_SELECTING,
+        "menu_message_id":     None,
     }
     return _sessions[user_id]
 
@@ -112,7 +126,7 @@ def _new_session(user_id: int, file_id: str, file_name: str) -> dict:
 def _clear_session(user_id: int) -> None:
     sess = _sessions.pop(user_id, None)
     if sess:
-        for path_key in ("local_path", "merge_local_path"):
+        for path_key in ("local_path", "merge_local_path", "subtitle_file_path"):
             p = sess.get(path_key, "")
             if p and os.path.exists(p):
                 try:
@@ -164,8 +178,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "  • 🗜 Compress (with your saved CRF / resolution)\n"
         "  • 📝 Remove Subtitles\n"
         "  • 🎵 Remove Streams\n"
+        "  • 🎨 Hardsub – burn subtitles into video (MLRE)\n"
         "  • ✏️ Rename\n"
         "  • 🔗 Merge with another file\n\n"
+        "🎨 *Custom font for hardsub:* upload any `.ttf` or `.otf` file to set "
+        "your rendering font, or use /setfont.\n\n"
         "Use /settings to configure compression quality.",
         parse_mode="Markdown",
     )
@@ -178,13 +195,15 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     user_id = update.effective_user.id
     s = db.get_settings(user_id)
+    font_name = Path(s["custom_font_path"]).name if s.get("custom_font_path") else "none"
     text = (
         "⚙️ *Current Settings*\n\n"
         f"  • CRF: `{s['crf']}`\n"
         f"  • Resolution: `{s['resolution']}`\n"
         f"  • Preset: `{s['preset']}`\n"
-        f"  • Codec: `{s['codec']}`\n\n"
-        "These settings are saved and used automatically every time you compress."
+        f"  • Codec: `{s['codec']}`\n"
+        f"  • Font: `{font_name}`\n\n"
+        "These settings are saved and used automatically every time you compress or hardsub."
     )
     await update.message.reply_text(text, parse_mode="Markdown", reply_markup=kb.settings_menu())
 
@@ -224,6 +243,58 @@ async def cmd_setres(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.message.reply_text(f"✅ Resolution set to `{resolved}`.", parse_mode="Markdown")
 
 
+# ── /setfont ───────────────────────────────────────────────────────────────────
+
+async def cmd_setfont(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update.effective_user.id):
+        return
+    user_id = update.effective_user.id
+    s = db.get_settings(user_id)
+    font_path = s.get("custom_font_path", "")
+    if font_path and os.path.exists(font_path):
+        font_name = Path(font_path).name
+        await update.message.reply_text(
+            f"🎨 Current font: *{font_name}*\n\n"
+            "Upload a new `.ttf` or `.otf` file to replace it, "
+            "or use /clearfont to remove it.",
+            parse_mode="Markdown",
+        )
+    else:
+        await update.message.reply_text(
+            "🎨 No custom font set.\n\n"
+            "Upload any `.ttf` or `.otf` file and I'll save it as your "
+            "rendering font for *Hardsub* operations.",
+            parse_mode="Markdown",
+        )
+
+
+# ── /clearfont ─────────────────────────────────────────────────────────────────
+
+async def cmd_clearfont(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_allowed(update.effective_user.id):
+        return
+    user_id = update.effective_user.id
+    s = db.get_settings(user_id)
+    old_font = s.get("custom_font_path", "")
+    if old_font and os.path.exists(old_font):
+        try:
+            os.remove(old_font)
+        except OSError:
+            pass
+    db.update_setting(user_id, "custom_font_path", "")
+    await update.message.reply_text(
+        "✅ Custom font cleared. Default system font will be used for hardsub.",
+        parse_mode="Markdown",
+    )
+    asyncio.create_task(
+        tgl.tg_log(
+            "INFO", "Custom font cleared",
+            user_id=user_id,
+            username=update.effective_user.username or "",
+        )
+    )
+
+
 # ── File upload handler ────────────────────────────────────────────────────────
 
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -231,14 +302,38 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     user_id = update.effective_user.id
+    msg = update.message
+
+    # ── Font file (.ttf / .otf) – accepted at any time, saved as default font ──
+    if msg.document:
+        doc_ext = Path(msg.document.file_name or "").suffix.lower()
+        if doc_ext in FONT_EXTS:
+            await _handle_font_upload(update, context)
+            return
+
     sess = _session(user_id)
 
-    # If we're waiting for a merge file, treat this upload as the second file
+    # ── Subtitle file – only accepted while waiting for one ────────────────────
+    if msg.document:
+        doc_ext = Path(msg.document.file_name or "").suffix.lower()
+        if doc_ext in SUBTITLE_EXTS:
+            if sess and sess["state"] == ST_WAIT_SUBTITLE:
+                await _handle_subtitle_upload(update, context, sess)
+            else:
+                await update.message.reply_text(
+                    "📄 Subtitle file received.\n\n"
+                    "To use it, first send a video then select the "
+                    "🎨 *Hardsub* operation.",
+                    parse_mode="Markdown",
+                )
+            return
+
+    # ── Merge file – waiting for second video ──────────────────────────────────
     if sess and sess["state"] == ST_WAIT_MERGE:
         await _receive_merge_file(update, context, sess)
         return
 
-    # Otherwise start a new session
+    # ── New video/audio file → start a fresh session ───────────────────────────
     status_msg = await update.message.reply_text("⏳ Downloading your file…")
     try:
         file_id, local_path, original_name = await _download_file(update, context)
@@ -247,6 +342,15 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     await status_msg.delete()
+
+    asyncio.create_task(
+        tgl.tg_log(
+            "FILE", f"File received: {original_name}",
+            user_id=user_id,
+            username=update.effective_user.username or "",
+            extra={"file": original_name},
+        )
+    )
 
     sess = _new_session(user_id, file_id, original_name)
     sess["local_path"] = local_path
@@ -285,6 +389,80 @@ async def _receive_merge_file(
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"✅ Merge file received: *{original_name}*\n\nNow press ▶️ Process Now to start.",
+        parse_mode="Markdown",
+        reply_markup=kb.operation_menu(sess["selected_ops"]),
+    )
+
+
+async def _handle_font_upload(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Save an uploaded .ttf/.otf file as the user's default rendering font."""
+    user_id = update.effective_user.id
+    doc = update.message.document
+    font_name = doc.file_name or f"font{Path(doc.file_name or '.ttf').suffix}"
+
+    user_fonts_dir = os.path.join(config.FONTS_DIR, str(user_id))
+    os.makedirs(user_fonts_dir, exist_ok=True)
+    font_path = os.path.join(user_fonts_dir, font_name)
+
+    status_msg = await update.message.reply_text("⏳ Saving font file…")
+    tg_file = await context.bot.get_file(doc.file_id)
+    await tg_file.download_to_drive(font_path)
+    await status_msg.delete()
+
+    db.update_setting(user_id, "custom_font_path", font_path)
+
+    await update.message.reply_text(
+        f"🎨 Font *{font_name}* saved as your default rendering font.\n\n"
+        "It will be used automatically for *Hardsub* operations.\n"
+        "Use /clearfont to remove it.",
+        parse_mode="Markdown",
+    )
+    asyncio.create_task(
+        tgl.tg_log(
+            "INFO", f"Custom font set: {font_name}",
+            user_id=user_id,
+            username=update.effective_user.username or "",
+        )
+    )
+
+
+async def _handle_subtitle_upload(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    sess: dict,
+) -> None:
+    """Download a subtitle file while in ST_WAIT_SUBTITLE state."""
+    user_id = update.effective_user.id
+    doc = update.message.document
+    sub_name = doc.file_name or "subtitle.srt"
+    sub_path = os.path.join(
+        config.DOWNLOAD_DIR, f"{user_id}_sub_{sub_name}"
+    )
+
+    status_msg = await update.message.reply_text("⏳ Downloading subtitle file…")
+    tg_file = await context.bot.get_file(doc.file_id)
+    await tg_file.download_to_drive(sub_path)
+    await status_msg.delete()
+
+    sess["subtitle_file_path"] = sub_path
+    sess["subtitle_file_name"] = sub_name
+    sess["state"]              = ST_SELECTING
+
+    # Show which font will be used
+    s = db.get_settings(user_id)
+    font_info = (
+        f"Font: *{Path(s['custom_font_path']).name}*"
+        if s.get("custom_font_path") and os.path.exists(s["custom_font_path"])
+        else "Font: system default (upload a .ttf/.otf or use /setfont to set a custom one)"
+    )
+
+    await update.message.reply_text(
+        f"✅ Subtitle file received: *{sub_name}*\n"
+        f"{font_info}\n\n"
+        "Press ▶️ Process Now to start.",
         parse_mode="Markdown",
         reply_markup=kb.operation_menu(sess["selected_ops"]),
     )
@@ -362,15 +540,40 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if data in ("cfg:back", "cfg:back_to_settings"):
         s = db.get_settings(user_id)
+        font_name = Path(s["custom_font_path"]).name if s.get("custom_font_path") else "none"
         text = (
             "⚙️ *Current Settings*\n\n"
             f"  • CRF: `{s['crf']}`\n"
             f"  • Resolution: `{s['resolution']}`\n"
             f"  • Preset: `{s['preset']}`\n"
-            f"  • Codec: `{s['codec']}`\n\n"
-            "These settings are saved and used automatically every time you compress."
+            f"  • Codec: `{s['codec']}`\n"
+            f"  • Font: `{font_name}`\n\n"
+            "These settings are saved and used automatically every time you compress or hardsub."
         )
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=kb.settings_menu())
+        return
+
+    if data == "cfg:font":
+        s = db.get_settings(user_id)
+        font_path = s.get("custom_font_path", "")
+        if font_path and os.path.exists(font_path):
+            font_name = Path(font_path).name
+            text = (
+                f"🎨 *Current font:* `{font_name}`\n\n"
+                "Upload a new `.ttf` or `.otf` file to replace it, "
+                "or use /clearfont to remove it."
+            )
+        else:
+            text = (
+                "🎨 *No custom font set.*\n\n"
+                "Upload any `.ttf` or `.otf` file and I'll use it for "
+                "*Hardsub* subtitle rendering."
+            )
+        await query.edit_message_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=kb.settings_menu(),
+        )
         return
 
     if data.startswith("set:"):
