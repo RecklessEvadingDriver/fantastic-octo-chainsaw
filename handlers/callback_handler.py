@@ -101,13 +101,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         s  = db.get_settings(user_id)
         fn = Path(s["custom_font_path"]).name if s.get("custom_font_path") else "none"
         text = (
-            f"✅ *{key.capitalize()}* → `{value}`\n\n"
-            "⚙️ *Settings*\n\n"
-            f"  • CRF: `{s['crf']}`\n"
-            f"  • Resolution: `{s['resolution']}`\n"
-            f"  • Preset: `{s['preset']}`\n"
-            f"  • Codec: `{s['codec']}`\n"
-            f"  • Font: `{fn}`"
+            f"✅ *{key.capitalize()}* updated to `{value}`\n\n"
+            "⚙️ *Current Settings*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"  🔢 CRF:        `{s['crf']}`\n"
+            f"  📐 Resolution: `{s['resolution']}`\n"
+            f"  ⚡ Preset:     `{s['preset']}`\n"
+            f"  🎬 Codec:      `{s['codec']}`\n"
+            f"  🎨 Font:       `{fn}`\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "_Saved and applied for every Compress & Hardsub operation._"
         )
         await query.edit_message_text(
             text, parse_mode="Markdown", reply_markup=kb.settings_menu()
