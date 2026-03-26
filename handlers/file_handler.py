@@ -123,29 +123,38 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     await status_msg.delete()
 
-    asyncio.create_task(
-        tgl.tg_log(
-            "FILE", f"Video received: {original_name}",
-            user_id=user_id,
-            username=update.effective_user.username or "",
-            extra={"size": fmt_size(os.path.getsize(local_path))},
+    try:
+        asyncio.create_task(
+            tgl.tg_log(
+                "FILE", f"Video received: {original_name}",
+                user_id=user_id,
+                username=update.effective_user.username or "",
+                extra={"size": fmt_size(os.path.getsize(local_path))},
+            )
         )
-    )
 
-    sess = new_session(user_id, file_id, original_name)
-    sess["local_path"]   = local_path
-    sess["streams_info"] = await asyncio.to_thread(ff.probe_streams, local_path)
+        sess = new_session(user_id, file_id, original_name)
+        sess["local_path"]   = local_path
+        sess["streams_info"] = await asyncio.to_thread(ff.probe_streams, local_path)
 
-    file_size = fmt_size(os.path.getsize(local_path))
-    menu_msg = await update.message.reply_text(
-        f"📁 *{original_name}*  •  `{file_size}`\n\n"
-        "Select the operations you want to apply, then press ▶️ *Process Now*.\n"
-        "_Results will be sent to your PM._",
-        parse_mode="Markdown",
-        reply_markup=kb.operation_menu(sess["selected_ops"]),
-    )
-    sess["menu_message_id"] = menu_msg.message_id
-    schedule_delete(context, update, menu_msg)
+        file_size = fmt_size(os.path.getsize(local_path))
+        menu_msg = await update.message.reply_text(
+            f"📁 *{original_name}*  •  `{file_size}`\n\n"
+            "Select the operations you want to apply, then press ▶️ *Process Now*.\n"
+            "_Results will be sent to your PM._",
+            parse_mode="Markdown",
+            reply_markup=kb.operation_menu(sess["selected_ops"]),
+        )
+        sess["menu_message_id"] = menu_msg.message_id
+        schedule_delete(context, update, menu_msg)
+    except Exception as exc:
+        # If session setup fails after a successful download, delete the local
+        # file immediately so it is not left on Heroku's ephemeral storage.
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+        raise exc
 
 
 async def _receive_merge_file(
@@ -162,18 +171,25 @@ async def _receive_merge_file(
         return
     await status_msg.delete()
 
-    from sessions import ST_SELECTING
-    sess["merge_file_id"]    = file_id
-    sess["merge_file_name"]  = original_name
-    sess["merge_local_path"] = local_path
-    sess["state"]            = ST_SELECTING
+    try:
+        from sessions import ST_SELECTING
+        sess["merge_file_id"]    = file_id
+        sess["merge_file_name"]  = original_name
+        sess["merge_local_path"] = local_path
+        sess["state"]            = ST_SELECTING
 
-    r = await update.message.reply_text(
-        f"✅ Merge file received: *{original_name}*\n\nPress ▶️ Process Now.",
-        parse_mode="Markdown",
-        reply_markup=kb.operation_menu(sess["selected_ops"]),
-    )
-    schedule_delete(context, update, r)
+        r = await update.message.reply_text(
+            f"✅ Merge file received: *{original_name}*\n\nPress ▶️ Process Now.",
+            parse_mode="Markdown",
+            reply_markup=kb.operation_menu(sess["selected_ops"]),
+        )
+        schedule_delete(context, update, r)
+    except Exception as exc:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+        raise exc
 
 
 async def _handle_font_upload(

@@ -80,6 +80,12 @@ def main() -> None:
         if config.LOG_CHANNEL_ID:
             tgl.init_tg_logger(app.bot, config.LOG_CHANNEL_ID)
         await tgl.tg_log("START", f"{config.BOT_BRAND} started and polling")
+        from utils.pyrogram_client import start_pyro_client
+        await start_pyro_client()
+
+    async def _on_shutdown(app: Application) -> None:
+        from utils.pyrogram_client import stop_pyro_client
+        await stop_pyro_client()
 
     builder = Application.builder().token(config.BOT_TOKEN)
     if config.LOCAL_API_SERVER:
@@ -89,7 +95,7 @@ def main() -> None:
             .base_file_url(f"{config.LOCAL_API_SERVER}/file/bot")
             .local_mode(True)
         )
-    app = builder.post_init(_on_startup).build()
+    app = builder.post_init(_on_startup).post_shutdown(_on_shutdown).build()
 
     # ── User commands ──────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",     cmd_start))

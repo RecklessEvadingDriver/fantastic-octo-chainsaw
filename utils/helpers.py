@@ -167,10 +167,16 @@ async def download_video(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> tuple[str, str, str]:
-    """
-    Download a video from the message.
-    Returns (file_id, local_path, original_name).
-    Raises ValueError for non-video messages or oversized files.
+    """Download a video from the message via the best available transport.
+
+    Returns ``(file_id, local_path, original_name)``.
+    Raises ``ValueError`` for non-video messages or oversized files.
+
+    When the file exceeds the standard Bot API download limit *and* no Local
+    Bot API Server is configured, the download is routed through the Pyrogram
+    MTProto client (bypassing the 20 MB restriction).  The local file is
+    written to *config.DOWNLOAD_DIR* and must be deleted by the caller (via
+    ``clear_session`` or an explicit ``try/finally`` + ``os.remove``).
     """
     msg = update.message
     if msg.video:
@@ -184,9 +190,37 @@ async def download_video(
     else:
         raise ValueError("Not a recognised video file.")
 
-    file_id = tg_file.file_id
+    file_id   = tg_file.file_id
     file_size = getattr(tg_file, "file_size", None)
-    dest = os.path.join(config.DOWNLOAD_DIR,
-                        f"{update.effective_user.id}_{original_name}")
-    await download_tg_file(context.bot, file_id, dest, file_size=file_size)
+    dest      = os.path.join(
+        config.DOWNLOAD_DIR,
+        f"{update.effective_user.id}_{original_name}",
+    )
+
+    limit_bytes = config.MAX_DOWNLOAD_SIZE_MB * 1024 * 1024
+    use_pyrogram = (
+        not config.LOCAL_API_SERVER
+        and file_size is not None
+        and file_size > limit_bytes
+    )
+
+    if use_pyrogram:
+        from utils.pyrogram_client import is_configured, pyro_download_file
+        if not is_configured():
+            raise ValueError(
+                f"File is too large ({fmt_size(file_size)}).  "
+                f"The standard Telegram Bot API only supports downloading files "
+                f"up to {config.MAX_DOWNLOAD_SIZE_MB} MB.  "
+                f"Set PYROGRAM_API_ID and PYROGRAM_API_HASH to enable large-file "
+                f"downloads, or ask the bot administrator to configure a Local "
+                f"Bot API Server."
+            )
+        await pyro_download_file(
+            chat_id=update.effective_chat.id,
+            message_id=update.message.message_id,
+            dest=dest,
+        )
+    else:
+        await download_tg_file(context.bot, file_id, dest, file_size=file_size)
+
     return file_id, dest, original_name

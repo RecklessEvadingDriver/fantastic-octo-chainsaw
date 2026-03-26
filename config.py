@@ -51,6 +51,14 @@ WEBHOOK_URL: str = os.environ.get("WEBHOOK_URL", "").rstrip("/")
 # PORT is automatically provided by Heroku; defaults to 8443 for local testing.
 PORT: int = int(os.environ.get("PORT", "8443"))
 
+# ----- Pyrogram MTProto credentials (for large-file downloads) -----
+# Obtain api_id and api_hash from https://my.telegram.org.
+# Required to use Pyrogram as an MTProto download client, which bypasses the
+# standard Telegram Bot API 20 MB download limit.
+# Leave as 0 / empty to disable Pyrogram and fall back to Bot API downloads.
+PYROGRAM_API_ID: int = int(os.environ.get("PYROGRAM_API_ID", "0"))
+PYROGRAM_API_HASH: str = os.environ.get("PYROGRAM_API_HASH", "")
+
 # ----- File size & splitting -----
 # Files larger than SPLIT_THRESHOLD_MB will be split into multiple parts before
 # being sent back to the user.
