@@ -27,8 +27,10 @@ Pyrogram-based entry point.  All logic lives in sub-packages:
 """
 
 import asyncio
+import json
 import logging
 import os
+import urllib.request
 
 from pyrogram import Client, filters, idle
 from pyrogram.handlers import CallbackQueryHandler, MessageHandler
@@ -139,6 +141,30 @@ def _register_handlers(app: Client) -> None:
     app.add_handler(CallbackQueryHandler(handle_callback))
 
 
+def _delete_telegram_webhook(token: str) -> None:
+    """
+    Delete any existing Telegram Bot API webhook.
+
+    If a webhook was previously set, Telegram will keep POSTing updates to it
+    even after switching to Pyrogram MTProto polling, causing Heroku H14 errors
+    (no web dyno to receive those requests).  Calling deleteWebhook once at
+    startup clears the webhook so Telegram stops making outbound HTTP requests.
+    """
+    try:
+        url = (
+            f"https://api.telegram.org/bot{token}"
+            "/deleteWebhook?drop_pending_updates=false"
+        )
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        if data.get("ok"):
+            logger.info("Telegram webhook deleted successfully.")
+        else:
+            logger.warning("deleteWebhook returned non-ok response: %s", data)
+    except Exception as exc:
+        logger.warning("Could not delete Telegram webhook: %s", exc)
+
+
 async def main() -> None:
     db.init_db()
 
@@ -156,6 +182,8 @@ async def main() -> None:
             "Export it as an environment variable or edit config.py."
         )
         return
+
+    await asyncio.to_thread(_delete_telegram_webhook, config.BOT_TOKEN)
 
     app = get_app()
     _register_handlers(app)
