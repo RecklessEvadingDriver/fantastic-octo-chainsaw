@@ -2,14 +2,15 @@
 Telegram channel logger.
 
 Sends structured, HTML-formatted log events to a configured Telegram
-channel or group.  Set LOG_CHANNEL_ID in config.py (or the env var) to
-enable.  If LOG_CHANNEL_ID is 0 / unset, every call is a silent no-op.
+channel or group using the Pyrogram MTProto client.  Set LOG_CHANNEL_ID
+in config.py (or the env var) to enable.  If LOG_CHANNEL_ID is 0 / unset,
+every call is a silent no-op.
 
 Usage
 -----
-1.  Call ``init_tg_logger(bot, channel_id)`` once at startup.
+1.  Call ``init_tg_logger(channel_id)`` once at startup.
 2.  Anywhere in async code: ``await tg_log("INFO", "message", user_id=…)``
-3.  For fire-and-forget inside handlers:
+3.  Fire-and-forget:
         import asyncio
         asyncio.create_task(tg_log("SUCCESS", "Done!", user_id=uid))
 """
@@ -21,8 +22,6 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Populated by init_tg_logger()
-_bot = None
 _channel_id: int = 0
 
 _LEVEL_EMOJI: dict[str, str] = {
@@ -36,10 +35,9 @@ _LEVEL_EMOJI: dict[str, str] = {
 }
 
 
-def init_tg_logger(bot, channel_id: int) -> None:
-    """Initialise the module with a Bot instance and target channel/group ID."""
-    global _bot, _channel_id
-    _bot = bot
+def init_tg_logger(channel_id: int) -> None:
+    """Initialise the module with a target channel/group ID."""
+    global _channel_id
     _channel_id = channel_id
     logger.info("TG logger initialised (channel=%s)", channel_id)
 
@@ -63,7 +61,7 @@ async def tg_log(
     username : Telegram username without '@' (optional).
     extra    : Additional key→value pairs shown as a bullet list.
     """
-    if not _bot or not _channel_id:
+    if not _channel_id:
         return
 
     emoji = _LEVEL_EMOJI.get(level.upper(), "📋")
@@ -88,6 +86,12 @@ async def tg_log(
 
     text = "\n".join(lines)
     try:
-        await _bot.send_message(chat_id=_channel_id, text=text, parse_mode="HTML")
+        from pyrogram import enums
+        from utils.pyrogram_client import get_app
+        client = get_app()
+        if client.is_connected:
+            await client.send_message(
+                _channel_id, text, parse_mode=enums.ParseMode.HTML
+            )
     except Exception as exc:
         logger.warning("Failed to send TG log: %s", exc)

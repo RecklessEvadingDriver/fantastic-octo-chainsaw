@@ -1,7 +1,7 @@
 """
 ⚡ Ab Bots — Video Processor
 ============================
-Entry point.  All logic lives in sub-packages:
+Pyrogram-based entry point.  All logic lives in sub-packages:
 
   handlers/
     user_commands.py    — /start  /settings  /setcrf  /setres  /setfont  /clearfont
@@ -10,36 +10,33 @@ Entry point.  All logic lives in sub-packages:
     file_handler.py     — video/document/audio upload handling
     text_handler.py     — plain-text input (rename, trim)
     callback_handler.py — inline keyboard callbacks
-    processing.py       — _start_processing + _process_file with live progress
+    processing.py       — start_processing + process_file with live progress
 
   utils/
     helpers.py          — shared helper functions
     force_join.py       — force-join channel enforcement
     progress.py         — animated progress tracker
+    pyrogram_client.py  — Pyrogram MTProto client singleton
 
   sessions.py           — global in-memory session & task state
   database.py           — SQLite persistence
   config.py             — configuration / env-vars
   ffmpeg_utils.py       — FFmpeg wrappers
-  keyboards.py          — inline keyboard builders
+  keyboards.py          — Pyrogram inline keyboard builders
   tg_logger.py          — Telegram channel logging
 """
 
-import hashlib
+import asyncio
 import logging
 import os
 
-from telegram.ext import (
-    Application,
-    CallbackQueryHandler,
-    CommandHandler,
-    MessageHandler,
-    filters,
-)
+from pyrogram import Client, filters, idle
+from pyrogram.handlers import CallbackQueryHandler, MessageHandler
 
 import config
 import database as db
 import tg_logger as tgl
+from utils.pyrogram_client import get_app
 
 from handlers.user_commands import (
     cmd_start, cmd_settings, cmd_setcrf, cmd_setres, cmd_setfont, cmd_clearfont,
@@ -62,12 +59,82 @@ logger = logging.getLogger(__name__)
 
 # ── Ensure working directories exist ──────────────────────────────────────────
 os.makedirs(config.DOWNLOAD_DIR, exist_ok=True)
-os.makedirs(config.OUTPUT_DIR, exist_ok=True)
-os.makedirs(config.FONTS_DIR, exist_ok=True)
+os.makedirs(config.OUTPUT_DIR,   exist_ok=True)
+os.makedirs(config.FONTS_DIR,    exist_ok=True)
 
 
-def main() -> None:
+def _register_handlers(app: Client) -> None:
+    """Register all message and callback handlers on *app*."""
+
+    # ── User commands ──────────────────────────────────────────────────────────
+    app.add_handler(MessageHandler(
+        cmd_start, filters.command(["start", "help"]) & ~filters.edited,
+    ))
+    app.add_handler(MessageHandler(
+        cmd_settings, filters.command("settings") & ~filters.edited,
+    ))
+    app.add_handler(MessageHandler(
+        cmd_setcrf, filters.command("setcrf") & ~filters.edited,
+    ))
+    app.add_handler(MessageHandler(
+        cmd_setres, filters.command("setres") & ~filters.edited,
+    ))
+    app.add_handler(MessageHandler(
+        cmd_setfont, filters.command("setfont") & ~filters.edited,
+    ))
+    app.add_handler(MessageHandler(
+        cmd_clearfont, filters.command("clearfont") & ~filters.edited,
+    ))
+
+    # ── Admin commands ─────────────────────────────────────────────────────────
+    app.add_handler(MessageHandler(
+        cmd_setforcejoin, filters.command("setforcejoin") & ~filters.edited,
+    ))
+    app.add_handler(MessageHandler(
+        cmd_removeforcejoin, filters.command("removeforcejoin") & ~filters.edited,
+    ))
+    app.add_handler(MessageHandler(
+        cmd_addpremium, filters.command("addpremium") & ~filters.edited,
+    ))
+    app.add_handler(MessageHandler(
+        cmd_removepremium, filters.command("removepremium") & ~filters.edited,
+    ))
+    app.add_handler(MessageHandler(
+        cmd_listpremium, filters.command("listpremium") & ~filters.edited,
+    ))
+    app.add_handler(MessageHandler(
+        cmd_stats, filters.command("stats") & ~filters.edited,
+    ))
+    app.add_handler(MessageHandler(
+        cmd_broadcast, filters.command("broadcast") & ~filters.edited,
+    ))
+
+    # ── File uploads (video, documents, audio) ─────────────────────────────────
+    app.add_handler(MessageHandler(
+        handle_file,
+        (filters.video | filters.document | filters.audio) & ~filters.edited,
+    ))
+
+    # ── Plain text (rename, trim input) ────────────────────────────────────────
+    app.add_handler(MessageHandler(
+        handle_text,
+        filters.text & ~filters.command & ~filters.edited,
+    ))
+
+    # ── Inline button callbacks ────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(handle_callback))
+
+
+async def main() -> None:
     db.init_db()
+
+    if not config.PYROGRAM_API_ID or not config.PYROGRAM_API_HASH:
+        logger.error(
+            "PYROGRAM_API_ID and PYROGRAM_API_HASH are required. "
+            "Obtain them from https://my.telegram.org/apps and set them as "
+            "environment variables."
+        )
+        return
 
     if config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         logger.error(
@@ -76,68 +143,20 @@ def main() -> None:
         )
         return
 
-    async def _on_startup(app: Application) -> None:
-        if config.LOG_CHANNEL_ID:
-            tgl.init_tg_logger(app.bot, config.LOG_CHANNEL_ID)
-        await tgl.tg_log("START", f"{config.BOT_BRAND} started and polling")
+    app = get_app()
+    _register_handlers(app)
 
-    builder = Application.builder().token(config.BOT_TOKEN)
-    if config.LOCAL_API_SERVER:
-        builder = (
-            builder
-            .base_url(f"{config.LOCAL_API_SERVER}/bot")
-            .base_file_url(f"{config.LOCAL_API_SERVER}/file/bot")
-            .local_mode(True)
+    async with app:
+        tgl.init_tg_logger(config.LOG_CHANNEL_ID)
+        await tgl.tg_log("START", f"{config.BOT_BRAND} started (Pyrogram MTProto)")
+        logger.info(
+            "Bot started — polling via Pyrogram MTProto "
+            "(no 20 MB download / 50 MB upload restriction)."
         )
-    app = builder.post_init(_on_startup).build()
+        await idle()
 
-    # ── User commands ──────────────────────────────────────────────────────────
-    app.add_handler(CommandHandler("start",     cmd_start))
-    app.add_handler(CommandHandler("settings",  cmd_settings))
-    app.add_handler(CommandHandler("setcrf",    cmd_setcrf))
-    app.add_handler(CommandHandler("setres",    cmd_setres))
-    app.add_handler(CommandHandler("setfont",   cmd_setfont))
-    app.add_handler(CommandHandler("clearfont", cmd_clearfont))
-
-    # ── Admin commands ─────────────────────────────────────────────────────────
-    app.add_handler(CommandHandler("setforcejoin",    cmd_setforcejoin))
-    app.add_handler(CommandHandler("removeforcejoin", cmd_removeforcejoin))
-    app.add_handler(CommandHandler("addpremium",      cmd_addpremium))
-    app.add_handler(CommandHandler("removepremium",   cmd_removepremium))
-    app.add_handler(CommandHandler("listpremium",     cmd_listpremium))
-    app.add_handler(CommandHandler("stats",           cmd_stats))
-    app.add_handler(CommandHandler("broadcast",       cmd_broadcast))
-
-    # ── File uploads (video, documents, audio) ─────────────────────────────────
-    app.add_handler(
-        MessageHandler(
-            filters.VIDEO | filters.Document.ALL | filters.AUDIO,
-            handle_file,
-        )
-    )
-
-    # ── Plain text (rename, trim input) ────────────────────────────────────────
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-    # ── Inline button callbacks ────────────────────────────────────────────────
-    app.add_handler(CallbackQueryHandler(handle_callback))
-
-    if config.WEBHOOK_URL:
-        # Use a SHA-256 hash of the token as the URL path so the raw token
-        # is never exposed in URLs or server logs.
-        webhook_path = hashlib.sha256(config.BOT_TOKEN.encode()).hexdigest()
-        logger.info("Bot started. Webhook on port %d…", config.PORT)
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=config.PORT,
-            url_path=webhook_path,
-            webhook_url=f"{config.WEBHOOK_URL}/{webhook_path}",
-            drop_pending_updates=True,
-        )
-    else:
-        logger.info("Bot started. Polling…")
-        app.run_polling(drop_pending_updates=True)
+    logger.info("Bot stopped.")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

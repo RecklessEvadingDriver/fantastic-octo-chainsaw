@@ -1,8 +1,8 @@
 """
 Inline-keyboard builders for the multi-select operation menu, settings panels,
-and admin operations.
+and admin operations.  All types come from ``pyrogram.types``.
 """
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 # ── Emoji markers ──────────────────────────────────────────────────────────────
 _ON  = "✅"
@@ -17,9 +17,9 @@ def _tick(flag: bool) -> str:
 
 OPERATIONS: dict[str, str] = {
     "compress":       "🗜 Compress",
-    "remove_subs":    "📝 Remove Subtitles",
+    "remove_subs":    "📝 Remove Subs",
     "remove_streams": "🎵 Remove Streams",
-    "hardsub":        "🎨 Hardsub (Burn Subs)",
+    "hardsub":        "🎨 Hardsub",
     "trim":           "✂️ Trim",
     "extract_audio":  "🎶 Extract Audio",
     "replace_audio":  "🔄 Replace Audio",
@@ -32,11 +32,7 @@ OPERATIONS: dict[str, str] = {
 # ── Operation menu ─────────────────────────────────────────────────────────────
 
 def operation_menu(selected: set[str]) -> InlineKeyboardMarkup:
-    """
-    Build the main multi-select operation menu.
-
-    *selected* is the set of currently toggled operation keys.
-    """
+    """Build the main multi-select operation menu."""
     rows = []
     op_items = list(OPERATIONS.items())
     for i in range(0, len(op_items), 2):
@@ -62,15 +58,15 @@ def operation_menu(selected: set[str]) -> InlineKeyboardMarkup:
 def settings_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔢 Set CRF",       callback_data="cfg:crf"),
-            InlineKeyboardButton("📐 Resolution",     callback_data="cfg:resolution"),
+            InlineKeyboardButton("🔢 Set CRF",   callback_data="cfg:crf"),
+            InlineKeyboardButton("📐 Resolution", callback_data="cfg:resolution"),
         ],
         [
-            InlineKeyboardButton("⚡ Set Preset",     callback_data="cfg:preset"),
-            InlineKeyboardButton("🎬 Set Codec",      callback_data="cfg:codec"),
+            InlineKeyboardButton("⚡ Preset",     callback_data="cfg:preset"),
+            InlineKeyboardButton("🎬 Codec",      callback_data="cfg:codec"),
         ],
-        [InlineKeyboardButton("🎨 Manage Font",       callback_data="cfg:font")],
-        [InlineKeyboardButton("« Back",               callback_data="cfg:back")],
+        [InlineKeyboardButton("🎨 Manage Font",   callback_data="cfg:font")],
+        [InlineKeyboardButton("« Back",           callback_data="cfg:back")],
     ])
 
 
@@ -111,15 +107,15 @@ def stream_selection_menu(
     streams: list[dict],
     selected_indices: set[int],
 ) -> InlineKeyboardMarkup:
-    """Toggle-list of streams; selected = will be removed."""
+    """Toggle-list of streams; selected streams will be removed."""
     rows = []
     for s in streams:
-        idx        = s["index"]
-        ctype      = s.get("codec_type", "unknown").upper()
-        cname      = s.get("codec_name", "?")
-        lang       = s.get("tags", {}).get("language", "")
-        title      = s.get("tags", {}).get("title", "")
-        parts      = [f"[{idx}]", ctype, cname]
+        idx   = s["index"]
+        ctype = s.get("codec_type", "unknown").upper()
+        cname = s.get("codec_name", "?")
+        lang  = s.get("tags", {}).get("language", "")
+        title = s.get("tags", {}).get("title", "")
+        parts = [f"[{idx}]", ctype, cname]
         if lang:
             parts.append(lang)
         if title:
@@ -160,15 +156,15 @@ def audio_format_menu() -> InlineKeyboardMarkup:
 def watermark_position_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("↖ Top-Left",    callback_data="wmpos:topleft"),
-            InlineKeyboardButton("↗ Top-Right",   callback_data="wmpos:topright"),
+            InlineKeyboardButton("↖ Top-Left",  callback_data="wmpos:topleft"),
+            InlineKeyboardButton("↗ Top-Right", callback_data="wmpos:topright"),
         ],
         [
-            InlineKeyboardButton("↙ Bottom-Left",    callback_data="wmpos:bottomleft"),
-            InlineKeyboardButton("↘ Bottom-Right",   callback_data="wmpos:bottomright"),
+            InlineKeyboardButton("↙ Bottom-Left",  callback_data="wmpos:bottomleft"),
+            InlineKeyboardButton("↘ Bottom-Right", callback_data="wmpos:bottomright"),
         ],
-        [InlineKeyboardButton("⊙ Center",         callback_data="wmpos:center")],
-        [InlineKeyboardButton("❌ Cancel",         callback_data="cancel")],
+        [InlineKeyboardButton("⊙ Center", callback_data="wmpos:center")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel")],
     ])
 
 
@@ -182,5 +178,13 @@ def force_join_keyboard(channel: str) -> InlineKeyboardMarkup:
         url = f"https://t.me/{channel.lstrip('@')}"
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("📢 Join Channel", url=url),
+    ]])
+
+
+# ── Start menu quick-actions ───────────────────────────────────────────────────
+
+def start_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⚙️ Settings", callback_data="cfg:back_to_settings"),
     ]])
 

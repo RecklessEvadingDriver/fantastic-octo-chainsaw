@@ -142,9 +142,52 @@ See `.env.example` for a full documented list.
 | `FORCE_JOIN_CHANNEL` | `` | Channel users must join (empty = disabled) |
 | `LOCAL_API_SERVER` | `` | Base URL of a local Bot API server (e.g. `http://localhost:8081`); empty = standard cloud API |
 | `MAX_DOWNLOAD_SIZE_MB` | `20` / `2000` | Max download size in MB (auto-set to 2000 when `LOCAL_API_SERVER` is configured) |
+| `PYROGRAM_API_ID` | `0` | Telegram API ID from <https://my.telegram.org> — enables MTProto large-file downloads |
+| `PYROGRAM_API_HASH` | `` | Telegram API hash from <https://my.telegram.org> — required alongside `PYROGRAM_API_ID` |
 | `SPLIT_THRESHOLD_MB` | `2000` | Split files larger than this |
 | `SPLIT_PART_SIZE_MB` | `1950` | Size of each split part |
 | `AUTO_DELETE_GROUP_SECONDS` | `30` | Group message TTL (0 = disabled) |
+
+---
+
+## 📦 Large File Support — MTProto via Pyrogram (Heroku-friendly)
+
+Because Heroku cannot host the Local Bot API Server, the bot supports an
+**alternative path** for downloading large files: the
+[Pyrogram](https://pyrogram.org/) MTProto library.  When enabled, files that
+exceed the 20 MB Bot API limit are downloaded directly via the Telegram
+MTProto protocol, natively bypassing the restriction **without** needing a
+Local Bot API Server.
+
+### Setup
+
+1. Obtain `api_id` and `api_hash` from <https://my.telegram.org/apps>.
+2. Set the two new environment variables:
+
+```bash
+# Local / .env
+PYROGRAM_API_ID=12345678
+PYROGRAM_API_HASH=abcdef1234567890abcdef1234567890
+
+# Heroku
+heroku config:set PYROGRAM_API_ID=12345678
+heroku config:set PYROGRAM_API_HASH=abcdef1234567890abcdef1234567890
+```
+
+### How it works
+
+| Setting | Standard Bot API | Pyrogram MTProto |
+|---|---|---|
+| Max download size | 20 MB | No hard limit |
+| Extra server needed | No | No |
+| Heroku-compatible | ✅ | ✅ |
+| `PYROGRAM_API_ID` | *(not used)* | Required |
+| `PYROGRAM_API_HASH` | *(not used)* | Required |
+
+When both variables are set, `download_video` automatically uses Pyrogram
+for any file that exceeds `MAX_DOWNLOAD_SIZE_MB`.  Every downloaded file is
+deleted via a `try/finally` + `os.remove()` block immediately after
+processing, keeping Heroku's ephemeral storage clean.
 
 ---
 

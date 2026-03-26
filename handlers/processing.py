@@ -10,9 +10,9 @@ import shutil
 import time
 from pathlib import Path
 
-from telegram import Update
-from telegram.error import Forbidden
-from telegram.ext import ContextTypes
+from pyrogram import Client
+from pyrogram.errors import UserIsBlocked, PeerIdInvalid
+from pyrogram.types import CallbackQuery
 
 import config
 import database as db
@@ -28,11 +28,12 @@ import keyboards as kb
 logger = logging.getLogger(__name__)
 
 
-async def start_processing(update: Update,
-                            context: ContextTypes.DEFAULT_TYPE,
-                            query,
-                            sess: dict) -> None:
-    user_id = update.effective_user.id
+async def start_processing(
+    client: Client,
+    query: CallbackQuery,
+    sess: dict,
+) -> None:
+    user_id = query.from_user.id
 
     if not sess["selected_ops"]:
         await query.answer("⚠️ Please select at least one operation.", show_alert=True)
@@ -47,8 +48,7 @@ async def start_processing(update: Update,
             return
         sess["state"] = ST_WAIT_STREAM
         await query.edit_message_text(
-            "🎵 *Select streams to remove* (tap to toggle):",
-            parse_mode="Markdown",
+            "🎵 **Select streams to remove** (tap to toggle):",
             reply_markup=kb.stream_selection_menu(
                 sess["streams_info"], sess["streams_to_remove"]
             ),
@@ -58,48 +58,42 @@ async def start_processing(update: Update,
     if "hardsub" in ops and not sess.get("subtitle_file_path"):
         sess["state"] = ST_WAIT_SUBTITLE
         await query.edit_message_text(
-            "🎨 *Hardsub selected.*\n\nSend your subtitle file (.srt / .ass / .ssa):",
-            parse_mode="Markdown",
+            "🎨 **Hardsub selected.**\n\nSend your subtitle file (`.srt` / `.ass` / `.ssa`):"
         )
         return
 
     if "rename" in ops and not sess.get("rename_to"):
         sess["state"] = ST_WAIT_RENAME
         await query.edit_message_text(
-            "✏️ Send the *new filename* (with or without extension):",
-            parse_mode="Markdown",
+            "✏️ Send the **new filename** (with or without extension):"
         )
         return
 
     if "merge" in ops and not sess.get("merge_file_id"):
         sess["state"] = ST_WAIT_MERGE
         await query.edit_message_text(
-            "🔗 Send the *second video* to merge with:",
-            parse_mode="Markdown",
+            "🔗 Send the **second video** to merge with:"
         )
         return
 
     if "watermark" in ops and not sess.get("watermark_path"):
         sess["state"] = ST_WAIT_WATERMARK
         await query.edit_message_text(
-            "🖼 Send the *watermark image* (PNG or JPG):",
-            parse_mode="Markdown",
+            "🖼 Send the **watermark image** (PNG or JPG):"
         )
         return
 
     if "replace_audio" in ops and not sess.get("replace_audio_path"):
         sess["state"] = ST_WAIT_REPLACE_AUD
         await query.edit_message_text(
-            "🔄 Send the *replacement audio file*:",
-            parse_mode="Markdown",
+            "🔄 Send the **replacement audio file**:"
         )
         return
 
     if "trim" in ops and not sess.get("trim_start"):
         sess["state"] = ST_WAIT_TRIM
         await query.edit_message_text(
-            "✂️ Send the *trim range*: `start [end]`\ne.g. `00:01:30 00:05:00`",
-            parse_mode="Markdown",
+            "✂️ Send the **trim range**: `start [end]`\ne.g. `00:01:30 00:05:00`"
         )
         return
 
@@ -127,23 +121,20 @@ async def start_processing(update: Update,
         "start": time.time(),
     }
 
-    status_msg = await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=build_progress_text(progress),
-        parse_mode="Markdown",
-    )
-    schedule_delete(context, update, status_msg)
+    chat_id    = query.message.chat.id
+    status_msg = await client.send_message(chat_id, build_progress_text(progress))
+    schedule_delete(client, status_msg)
 
     asyncio.create_task(
         tgl.tg_log(
             "PROCESS", f"Processing started: {', '.join(sorted(ops))}",
             user_id=user_id,
-            username=update.effective_user.username or "",
+            username=query.from_user.username or "",
         )
     )
 
-    stop_event    = asyncio.Event()
-    updater_task  = asyncio.create_task(
+    stop_event   = asyncio.Event()
+    updater_task = asyncio.create_task(
         progress_updater(status_msg, progress, stop_event)
     )
 
@@ -155,17 +146,16 @@ async def start_processing(update: Update,
         stop_event.set()
         await updater_task
         logger.exception("Processing failed for user %s", user_id)
-        err_msg = await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"❌ Processing failed:\n<code>{exc}</code>",
-            parse_mode="HTML",
+        err_msg = await client.send_message(
+            chat_id,
+            f"❌ **Processing failed:**\n`{exc}`",
         )
-        schedule_delete(context, update, err_msg)
+        schedule_delete(client, err_msg)
         asyncio.create_task(
             tgl.tg_log(
                 "ERROR", f"Processing failed: {exc}",
                 user_id=user_id,
-                username=update.effective_user.username or "",
+                username=query.from_user.username or "",
             )
         )
         _active_tasks.discard(user_id)
@@ -178,9 +168,9 @@ async def start_processing(update: Update,
     elapsed_secs = int(time.time() - progress["start"])
     elapsed_str  = f"{elapsed_secs // 60:02d}:{elapsed_secs % 60:02d}"
 
-    # ── Deliver results to user's PM ───────────────────────────────────────────
+    # ── Deliver results to user's PM via MTProto ───────────────────────────────
     try:
-        await status_msg.edit_text("📤 Sending result to your PM…")
+        await status_msg.edit_text("📤 Uploading result to your PM via MTProto…")
     except Exception:
         pass
 
@@ -190,40 +180,39 @@ async def start_processing(update: Update,
     delivered   = 0
 
     for i, out_path in enumerate(output_files):
-        part_label  = f"Part {i + 1}/{total_parts}\n" if total_parts > 1 else ""
-        file_size   = fmt_size(os.path.getsize(out_path))
-        caption     = (
+        part_label = f"**Part {i + 1}/{total_parts}**\n" if total_parts > 1 else ""
+        file_size  = fmt_size(os.path.getsize(out_path))
+        caption    = (
             f"✅ {part_label}"
-            f"📋 *Operations:* {ops_caption}\n"
-            f"📦 *Size:* `{file_size}`  •  ⏱ *Time:* `{elapsed_str}`\n\n"
+            f"📋 **Operations:** {ops_caption}\n"
+            f"📦 **Size:** `{file_size}`  •  ⏱ **Time:** `{elapsed_str}`\n\n"
             f"_— {config.BOT_BRAND}_"
         )
-        fname      = (
+        fname = (
             f"{final_base}.part{i + 1:03d}{Path(out_path).suffix}"
             if total_parts > 1
             else (sess.get("rename_to") or Path(out_path).name)
         )
         try:
-            with open(out_path, "rb") as f:
-                await context.bot.send_document(
-                    chat_id=user_id,   # always PM
-                    document=f,
-                    filename=fname,
-                    caption=caption,
-                    parse_mode="Markdown",
-                )
+            await client.send_document(
+                chat_id=user_id,   # always PM
+                document=out_path,
+                file_name=fname,
+                caption=caption,
+            )
             delivered += 1
-        except Forbidden:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="⚠️ I can't send files to your PM. "
-                     "Please start a chat with me first, then try again.",
+        except (UserIsBlocked, PeerIdInvalid):
+            await client.send_message(
+                chat_id,
+                "⚠️ I can't send files to your PM.\n"
+                "Please send /start to this bot in a **private message** first, "
+                "then try again.",
             )
             break
         except Exception as exc:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=f"❌ Upload failed (part {i + 1}): {exc}",
+            await client.send_message(
+                chat_id,
+                f"❌ Upload failed (part {i + 1}): `{exc}`",
             )
         finally:
             try:
@@ -236,7 +225,7 @@ async def start_processing(update: Update,
             "SUCCESS" if delivered == total_parts else "WARN",
             f"Delivered {delivered}/{total_parts} file(s)",
             user_id=user_id,
-            username=update.effective_user.username or "",
+            username=query.from_user.username or "",
             extra={"ops": ops_caption},
         )
     )
@@ -245,12 +234,10 @@ async def start_processing(update: Update,
         await status_msg.delete()
     except Exception:
         pass
-    if sess.get("menu_message_id") and update.effective_chat.type != "private":
+
+    if sess.get("menu_message_id"):
         try:
-            await context.bot.delete_message(
-                chat_id=update.effective_chat.id,
-                message_id=sess["menu_message_id"],
-            )
+            await client.delete_messages(chat_id, sess["menu_message_id"])
         except Exception:
             pass
 
@@ -267,7 +254,7 @@ def process_file(user_id: int, sess: dict,
     Returns a list of output file paths (multiple if the file is split).
     """
     settings = db.get_settings(user_id)
-    ops      = set(sess["selected_ops"])   # local copy so we can mutate
+    ops      = set(sess["selected_ops"])
     src      = sess["local_path"]
     ext      = Path(sess["file_name"]).suffix or ".mp4"
     out_dir  = config.OUTPUT_DIR
@@ -281,7 +268,6 @@ def process_file(user_id: int, sess: dict,
         return os.path.join(out_dir, f"{user_id}_step{step}{suffix}{e}")
 
     def _tick(op_key: str) -> None:
-        """Advance the progress counter for *op_key*."""
         if progress is not None:
             progress["op"]   = OP_DISPLAY.get(op_key, op_key)
             progress["step"] = progress.get("step", 0) + 1
@@ -336,7 +322,7 @@ def process_file(user_id: int, sess: dict,
         )
         current = out
 
-    # 7. Hardsub (MLRE) – re-encodes, absorbs compress
+    # 7. Hardsub — re-encodes and absorbs compress
     if "hardsub" in ops and sess.get("subtitle_file_path"):
         _tick("hardsub")
         out = _next("_hardsubbed")
@@ -365,7 +351,7 @@ def process_file(user_id: int, sess: dict,
         )
         current = out
 
-    # 9. Extract audio (standalone; skips remaining video steps)
+    # 9. Extract audio (standalone)
     if "extract_audio" in ops:
         _tick("extract_audio")
         fmt = sess.get("extract_audio_fmt", "mp3")
