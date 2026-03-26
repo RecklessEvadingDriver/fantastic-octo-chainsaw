@@ -25,6 +25,7 @@ Entry point.  All logic lives in sub-packages:
   tg_logger.py          — Telegram channel logging
 """
 
+import hashlib
 import logging
 import os
 
@@ -121,8 +122,21 @@ def main() -> None:
     # ── Inline button callbacks ────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(handle_callback))
 
-    logger.info("Bot started. Polling…")
-    app.run_polling(drop_pending_updates=True)
+    if config.WEBHOOK_URL:
+        # Use a SHA-256 hash of the token as the URL path so the raw token
+        # is never exposed in URLs or server logs.
+        webhook_path = hashlib.sha256(config.BOT_TOKEN.encode()).hexdigest()
+        logger.info("Bot started. Webhook on port %d…", config.PORT)
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=config.PORT,
+            url_path=webhook_path,
+            webhook_url=f"{config.WEBHOOK_URL}/{webhook_path}",
+            drop_pending_updates=True,
+        )
+    else:
+        logger.info("Bot started. Polling…")
+        app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
