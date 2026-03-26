@@ -80,12 +80,15 @@ def main() -> None:
             tgl.init_tg_logger(app.bot, config.LOG_CHANNEL_ID)
         await tgl.tg_log("START", f"{config.BOT_BRAND} started and polling")
 
-    app = (
-        Application.builder()
-        .token(config.BOT_TOKEN)
-        .post_init(_on_startup)
-        .build()
-    )
+    builder = Application.builder().token(config.BOT_TOKEN)
+    if config.LOCAL_API_SERVER:
+        builder = (
+            builder
+            .base_url(f"{config.LOCAL_API_SERVER}/bot")
+            .base_file_url(f"{config.LOCAL_API_SERVER}/file/bot")
+            .local_mode(True)
+        )
+    app = builder.post_init(_on_startup).build()
 
     # ── User commands ──────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",     cmd_start))
