@@ -6,8 +6,8 @@ import logging
 import os
 from pathlib import Path
 
-from telegram import Update
-from telegram.ext import ContextTypes
+from pyrogram import Client, enums
+from pyrogram.types import Message
 
 import config
 import tg_logger as tgl
@@ -77,7 +77,7 @@ def is_admin(user_id: int) -> bool:
 # ── File type detection ────────────────────────────────────────────────────────
 
 def is_video_document(doc) -> bool:
-    """Return True if *doc* (a Telegram Document) is a video file."""
+    """Return True if *doc* (a Pyrogram Document) is a video file."""
     if doc is None:
         return False
     mime = (doc.mime_type or "").lower()
@@ -96,131 +96,103 @@ def fmt_size(size_bytes: int) -> str:
     return f"{size:.1f} TB"
 
 
+def fmt_duration(seconds: float) -> str:
+    """Format a duration in seconds to MM:SS or HH:MM:SS."""
+    secs = int(seconds)
+    h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
+    if h:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
 # ── Group message auto-deletion ────────────────────────────────────────────────
 
-async def auto_delete(context: ContextTypes.DEFAULT_TYPE,
-                      chat_id: int, message_id: int) -> None:
+async def _auto_delete(client: Client, chat_id: int, message_id: int) -> None:
     """Delete a group message after AUTO_DELETE_GROUP_SECONDS."""
     delay = config.AUTO_DELETE_GROUP_SECONDS
     if delay <= 0:
         return
     await asyncio.sleep(delay)
     try:
-        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        await client.delete_messages(chat_id, message_id)
     except Exception:
         pass
 
 
-def schedule_delete(context: ContextTypes.DEFAULT_TYPE,
-                    update: Update, message) -> None:
+def schedule_delete(client: Client, message: Message) -> None:
     """Fire-and-forget deletion of bot messages sent in group chats."""
-    if update.effective_chat and update.effective_chat.type != "private":
+    if message.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
         asyncio.create_task(
-            auto_delete(context, update.effective_chat.id, message.message_id)
+            _auto_delete(client, message.chat.id, message.id)
         )
 
 
 # ── TG channel logging ─────────────────────────────────────────────────────────
 
-def tg_log(level: str, message: str, update: Update, **kw) -> None:
+def tg_log(level: str, text: str, message: Message, **kw) -> None:
     """Fire-and-forget TG channel log from within an async handler."""
-    u = update.effective_user
+    u = message.from_user
     asyncio.create_task(
-        tgl.tg_log(level, message,
+        tgl.tg_log(level, text,
                    user_id=u.id if u else 0,
-                   username=u.username or "" if u else "",
+                   username=(u.username or "") if u else "",
                    **kw)
     )
 
 
 # ── File download ──────────────────────────────────────────────────────────────
 
-async def download_tg_file(bot, file_id: str, dest: str,
-                           file_size: int | None = None) -> None:
-    """Download any Telegram file to *dest*.
+async def download_tg_file(client: Client, message: Message, dest: str) -> None:
+    """Download any Telegram file to *dest* via Pyrogram MTProto.
 
-    *file_size* (bytes) is optional.  When provided the function rejects files
-    that exceed ``config.MAX_DOWNLOAD_SIZE_MB`` before even contacting the API,
-    giving the user a clear error instead of a cryptic 400 Bad Request.
+    Uses ``client.download_media`` which routes through MTProto and bypasses
+    both the 20 MB download limit and the standard Bot API file-size cap.
+    The caller is responsible for deleting *dest* after use.
     """
-    limit_bytes = config.MAX_DOWNLOAD_SIZE_MB * 1024 * 1024
-    if file_size is not None and file_size > limit_bytes:
-        if config.LOCAL_API_SERVER:
-            hint = "Please compress or split the file before sending."
-        else:
-            hint = (
-                f"The standard Telegram Bot API only supports downloading files "
-                f"up to {config.MAX_DOWNLOAD_SIZE_MB} MB. "
-                f"Please compress or split the file to under "
-                f"{config.MAX_DOWNLOAD_SIZE_MB} MB before sending, or ask the "
-                f"bot administrator to configure a local Bot API server to lift "
-                f"this restriction."
-            )
-        raise ValueError(
-            f"File is too large ({fmt_size(file_size)}).  {hint}"
-        )
-    tg_file = await bot.get_file(file_id)
-    await tg_file.download_to_drive(dest)
+    downloaded = await client.download_media(message, file_name=dest)
+    # Pyrogram may append an extension; use shutil.move for cross-filesystem safety.
+    if downloaded and os.path.abspath(str(downloaded)) != os.path.abspath(dest):
+        import shutil
+        shutil.move(str(downloaded), dest)
 
 
 async def download_video(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+    client: Client,
+    message: Message,
 ) -> tuple[str, str, str]:
-    """Download a video from the message via the best available transport.
+    """Download a video from *message* via Pyrogram MTProto.
 
     Returns ``(file_id, local_path, original_name)``.
     Raises ``ValueError`` for non-video messages or oversized files.
 
-    When the file exceeds the standard Bot API download limit *and* no Local
-    Bot API Server is configured, the download is routed through the Pyrogram
-    MTProto client (bypassing the 20 MB restriction).  The local file is
-    written to *config.DOWNLOAD_DIR* and must be deleted by the caller (via
-    ``clear_session`` or an explicit ``try/finally`` + ``os.remove``).
+    All downloads use Pyrogram MTProto, natively bypassing the 20 MB
+    Telegram Bot API restriction.  The caller must delete *local_path*
+    after use (via ``clear_session`` or explicit ``try/finally`` + ``os.remove``).
     """
-    msg = update.message
-    if msg.video:
-        tg_file = msg.video
-        original_name = getattr(tg_file, "file_name", None) or "video.mp4"
+    if message.video:
+        tg_file       = message.video
+        original_name = tg_file.file_name or "video.mp4"
         if not Path(original_name).suffix:
             original_name += ".mp4"
-    elif msg.document and is_video_document(msg.document):
-        tg_file = msg.document
+    elif message.document and is_video_document(message.document):
+        tg_file       = message.document
         original_name = tg_file.file_name or "video.mp4"
     else:
         raise ValueError("Not a recognised video file.")
 
     file_id   = tg_file.file_id
     file_size = getattr(tg_file, "file_size", None)
-    dest      = os.path.join(
-        config.DOWNLOAD_DIR,
-        f"{update.effective_user.id}_{original_name}",
-    )
-
     limit_bytes = config.MAX_DOWNLOAD_SIZE_MB * 1024 * 1024
-    use_pyrogram = (
-        not config.LOCAL_API_SERVER
-        and file_size is not None
-        and file_size > limit_bytes
-    )
-
-    if use_pyrogram:
-        from utils.pyrogram_client import is_configured, pyro_download_file
-        if not is_configured():
-            raise ValueError(
-                f"File is too large ({fmt_size(file_size)}).  "
-                f"The standard Telegram Bot API only supports downloading files "
-                f"up to {config.MAX_DOWNLOAD_SIZE_MB} MB.  "
-                f"Set PYROGRAM_API_ID and PYROGRAM_API_HASH to enable large-file "
-                f"downloads, or ask the bot administrator to configure a Local "
-                f"Bot API Server."
-            )
-        await pyro_download_file(
-            chat_id=update.effective_chat.id,
-            message_id=update.message.message_id,
-            dest=dest,
+    if file_size is not None and file_size > limit_bytes:
+        raise ValueError(
+            f"File is too large ({fmt_size(file_size)}).  "
+            f"Maximum accepted size is {config.MAX_DOWNLOAD_SIZE_MB} MB "
+            f"(Telegram's 2 GB hard limit applies)."
         )
-    else:
-        await download_tg_file(context.bot, file_id, dest, file_size=file_size)
 
+    dest = os.path.join(
+        config.DOWNLOAD_DIR,
+        f"{message.from_user.id}_{original_name}",
+    )
+    await download_tg_file(client, message, dest)
     return file_id, dest, original_name

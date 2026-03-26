@@ -5,8 +5,8 @@ import logging
 import os
 from pathlib import Path
 
-from telegram import Update
-from telegram.ext import ContextTypes
+from pyrogram import Client
+from pyrogram.types import CallbackQuery
 
 import config
 import database as db
@@ -18,23 +18,23 @@ from utils.force_join import require_join
 logger = logging.getLogger(__name__)
 
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
+async def handle_callback(client: Client, query: CallbackQuery) -> None:
     await query.answer()
 
-    if not is_allowed(update.effective_user.id):
+    user = query.from_user
+    if not user or not is_allowed(user.id):
         return
 
-    if await require_join(update, context):
+    if await require_join(client, query=query):
         return
 
-    user_id = update.effective_user.id
+    user_id = user.id
     data    = query.data
 
     # ── Settings panel ─────────────────────────────────────────────────────────
     if data == "cfg:crf":
         await query.edit_message_text(
-            "Send /setcrf <value> (0–51).\nLower = better quality. Recommended: 18–28."
+            "Send `/setcrf <value>` (0–51).\nLower = better quality.  Recommended: 18–28."
         )
         return
 
@@ -46,7 +46,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if data == "cfg:preset":
         await query.edit_message_text(
-            "Choose an encoding preset.\nSlower = smaller file, longer encode time.",
+            "Choose an encoding preset.\nSlower = smaller file / longer encode time.",
             reply_markup=kb.preset_menu(),
         )
         return
@@ -61,19 +61,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         s  = db.get_settings(user_id)
         fn = Path(s["custom_font_path"]).name if s.get("custom_font_path") else "none"
         text = (
-            "⚙️ *Current Settings*\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"  🔢 CRF:        `{s['crf']}`\n"
-            f"  📐 Resolution: `{s['resolution']}`\n"
-            f"  ⚡ Preset:     `{s['preset']}`\n"
-            f"  🎬 Codec:      `{s['codec']}`\n"
-            f"  🎨 Font:       `{fn}`\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚙️ **Encoding Settings**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"  🔢 **CRF:**        `{s['crf']}`\n"
+            f"  📐 **Resolution:** `{s['resolution']}`\n"
+            f"  ⚡ **Preset:**     `{s['preset']}`\n"
+            f"  🎬 **Codec:**      `{s['codec']}`\n"
+            f"  🎨 **Font:**       `{fn}`\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "_Saved and applied for every Compress & Hardsub operation._"
         )
-        await query.edit_message_text(
-            text, parse_mode="Markdown", reply_markup=kb.settings_menu()
-        )
+        await query.edit_message_text(text, reply_markup=kb.settings_menu())
         return
 
     if data == "cfg:font":
@@ -81,17 +79,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         fp = s.get("custom_font_path", "")
         if fp and os.path.exists(fp):
             text = (
-                f"🎨 *Current font:* `{Path(fp).name}`\n\n"
-                "Upload a new `.ttf`/`.otf` to replace, or /clearfont."
+                f"🎨 **Current font:** `{Path(fp).name}`\n\n"
+                "Upload a new `.ttf`/`.otf` to replace it, or /clearfont."
             )
         else:
             text = (
-                "🎨 *No custom font set.*\n\n"
-                "Upload any `.ttf`/`.otf` for hardsub rendering."
+                "🎨 **No custom font set.**\n\n"
+                "Upload any `.ttf`/`.otf` file for hardsub rendering."
             )
-        await query.edit_message_text(
-            text, parse_mode="Markdown", reply_markup=kb.settings_menu()
-        )
+        await query.edit_message_text(text, reply_markup=kb.settings_menu())
         return
 
     if data.startswith("set:"):
@@ -102,20 +98,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         s  = db.get_settings(user_id)
         fn = Path(s["custom_font_path"]).name if s.get("custom_font_path") else "none"
         text = (
-            f"✅ *{key.capitalize()}* updated to `{value}`\n\n"
-            "⚙️ *Current Settings*\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"  🔢 CRF:        `{s['crf']}`\n"
-            f"  📐 Resolution: `{s['resolution']}`\n"
-            f"  ⚡ Preset:     `{s['preset']}`\n"
-            f"  🎬 Codec:      `{s['codec']}`\n"
-            f"  🎨 Font:       `{fn}`\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"✅ **{key.capitalize()}** updated to `{value}`\n\n"
+            "⚙️ **Encoding Settings**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"  🔢 **CRF:**        `{s['crf']}`\n"
+            f"  📐 **Resolution:** `{s['resolution']}`\n"
+            f"  ⚡ **Preset:**     `{s['preset']}`\n"
+            f"  🎬 **Codec:**      `{s['codec']}`\n"
+            f"  🎨 **Font:**       `{fn}`\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "_Saved and applied for every Compress & Hardsub operation._"
         )
-        await query.edit_message_text(
-            text, parse_mode="Markdown", reply_markup=kb.settings_menu()
-        )
+        await query.edit_message_text(text, reply_markup=kb.settings_menu())
         return
 
     # ── Watermark position ─────────────────────────────────────────────────────
@@ -125,8 +119,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             sess["watermark_position"] = data[6:]
             sess["state"]              = ST_SELECTING
             await query.edit_message_text(
-                f"✅ Watermark position: *{data[6:]}*\n\nPress ▶️ Process Now.",
-                parse_mode="Markdown",
+                f"✅ Watermark position: **{data[6:]}**\n\nPress ▶️ **Process Now**.",
                 reply_markup=kb.operation_menu(sess["selected_ops"]),
             )
         return
@@ -139,8 +132,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             sess["extract_audio_fmt"] = fmt
             sess["state"]             = ST_SELECTING
             await query.edit_message_text(
-                f"✅ Audio format: *{fmt.upper()}*\n\nPress ▶️ Process Now.",
-                parse_mode="Markdown",
+                f"✅ Audio format: **{fmt.upper()}**\n\nPress ▶️ **Process Now**.",
                 reply_markup=kb.operation_menu(sess["selected_ops"]),
             )
         return
@@ -149,7 +141,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     sess = get_session(user_id)
     if not sess:
         await query.edit_message_text(
-            "⚠️ Session expired or not found. Please send your video again to start a new session."
+            "⚠️ Session expired or not found.  Please send your video again."
         )
         return
 
@@ -170,12 +162,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if data == "cancel":
         clear_session(user_id)
-        await query.edit_message_text("❌ Operation cancelled. Send a new video whenever you're ready.")
+        await query.edit_message_text(
+            "❌ Operation cancelled.  Send a new video whenever you're ready."
+        )
         return
 
     if data == "process":
         from handlers.processing import start_processing
-        await start_processing(update, context, query, sess)
+        await start_processing(client, query, sess)
         return
 
     # ── Stream selection toggles ───────────────────────────────────────────────
@@ -184,8 +178,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if suffix == "confirm":
             sess["state"] = ST_SELECTING
             await query.edit_message_text(
-                f"✅ Will remove {len(sess['streams_to_remove'])} stream(s).\n\n"
-                "Press ▶️ Process Now.",
+                f"✅ Will remove **{len(sess['streams_to_remove'])}** stream(s).\n\n"
+                "Press ▶️ **Process Now**.",
                 reply_markup=kb.operation_menu(sess["selected_ops"]),
             )
         elif suffix == "cancel":
