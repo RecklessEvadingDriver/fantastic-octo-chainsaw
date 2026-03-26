@@ -36,6 +36,17 @@ from pyrogram.handlers import CallbackQueryHandler, MessageHandler
 # pyrogram 2.0.x does not expose filters.edited; build the equivalent manually.
 edited = filters.create(lambda _, __, m: bool(getattr(m, "edit_date", None)))
 
+# pyrogram 2.0.x exposes filters.command as a factory *method*, not a filter
+# instance, so `~filters.command` raises TypeError.  Build a plain filter that
+# matches any bot-command message (text starting with "/") so it can be
+# negated with ~.
+is_command = filters.create(
+    lambda _, __, m: bool(
+        (m.text and m.text.startswith("/"))
+        or (m.caption and m.caption.startswith("/"))
+    )
+)
+
 import config
 import database as db
 import tg_logger as tgl
@@ -121,7 +132,7 @@ def _register_handlers(app: Client) -> None:
     # ── Plain text (rename, trim input) ────────────────────────────────────────
     app.add_handler(MessageHandler(
         handle_text,
-        filters.text & ~filters.command & ~edited,
+        filters.text & ~is_command & ~edited,
     ))
 
     # ── Inline button callbacks ────────────────────────────────────────────────
