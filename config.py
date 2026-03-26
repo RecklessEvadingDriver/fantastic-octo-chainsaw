@@ -43,6 +43,14 @@ DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "bot_data.db")
 # allow files up to 2000 MB.  Leave empty to use the standard cloud API.
 LOCAL_API_SERVER: str = os.environ.get("LOCAL_API_SERVER", "").rstrip("/")
 
+# ----- Heroku / Webhook settings -----
+# Set WEBHOOK_URL to your Heroku app URL (e.g. "https://your-app.herokuapp.com").
+# When set the bot runs in webhook mode (required on Heroku).
+# Leave empty to use long-polling (suitable for local development).
+WEBHOOK_URL: str = os.environ.get("WEBHOOK_URL", "").rstrip("/")
+# PORT is automatically provided by Heroku; defaults to 8443 for local testing.
+PORT: int = int(os.environ.get("PORT", "8443"))
+
 # ----- File size & splitting -----
 # Files larger than SPLIT_THRESHOLD_MB will be split into multiple parts.
 # For the standard Telegram Bot API the practical send limit is ~2000 MB.
