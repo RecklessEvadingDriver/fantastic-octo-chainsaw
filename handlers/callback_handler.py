@@ -12,7 +12,8 @@ import config
 import database as db
 import keyboards as kb
 from sessions import ST_PROCESSING, ST_SELECTING, ST_WAIT_STREAM
-from utils.helpers import is_allowed, get_session, clear_session, schedule_deletefrom utils.force_join import require_join
+from utils.helpers import is_allowed, get_session, clear_session, schedule_delete
+from utils.force_join import require_join
 
 logger = logging.getLogger(__name__)
 
