@@ -140,9 +140,63 @@ See `.env.example` for a full documented list.
 | `LOG_CHANNEL_ID` | `0` | Channel/group for TG logs (0 = disabled) |
 | `ALLOWED_USER_IDS` | `` | Whitelist (empty = open to all) |
 | `FORCE_JOIN_CHANNEL` | `` | Channel users must join (empty = disabled) |
+| `LOCAL_API_SERVER` | `` | Base URL of a local Bot API server (e.g. `http://localhost:8081`); empty = standard cloud API |
+| `MAX_DOWNLOAD_SIZE_MB` | `20` / `2000` | Max download size in MB (auto-set to 2000 when `LOCAL_API_SERVER` is configured) |
 | `SPLIT_THRESHOLD_MB` | `2000` | Split files larger than this |
 | `SPLIT_PART_SIZE_MB` | `1950` | Size of each split part |
 | `AUTO_DELETE_GROUP_SECONDS` | `30` | Group message TTL (0 = disabled) |
+
+---
+
+## 📦 Large File Support (Local Bot API Server)
+
+The standard Telegram cloud API refuses to download files larger than **20 MB**.
+To handle files up to **2 000 MB** you must run a
+[local Telegram Bot API server](https://github.com/tdlib/telegram-bot-api) and
+point the bot at it.
+
+### 1 — Run the local server
+
+```bash
+# Build & start (Docker is the easiest route)
+docker run -d --name telegram-bot-api \
+  -p 8081:8081 \
+  -e TELEGRAM_API_ID=<your_api_id> \
+  -e TELEGRAM_API_HASH=<your_api_hash> \
+  --restart unless-stopped \
+  aiogram/telegram-bot-api:latest
+```
+
+> Obtain `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` from  
+> <https://my.telegram.org/apps>.
+
+### 2 — Configure the bot
+
+Set the `LOCAL_API_SERVER` environment variable to the server's base URL:
+
+```bash
+# Local / .env
+LOCAL_API_SERVER=http://localhost:8081
+
+# Heroku
+heroku config:set LOCAL_API_SERVER=http://<server-ip>:8081
+```
+
+`MAX_DOWNLOAD_SIZE_MB` is raised to **2000** automatically.  
+Override it explicitly if needed:
+
+```bash
+MAX_DOWNLOAD_SIZE_MB=1500   # custom cap in MB
+```
+
+### 3 — How it works
+
+| Setting | Standard cloud API | Local Bot API server |
+|---|---|---|
+| Max download size | 20 MB | 2 000 MB |
+| `LOCAL_API_SERVER` | *(empty)* | `http://host:8081` |
+| `MAX_DOWNLOAD_SIZE_MB` | 20 | 2000 (auto) |
+| Bot API base URL | `https://api.telegram.org/bot` | `http://host:8081/bot` |
 
 ---
 

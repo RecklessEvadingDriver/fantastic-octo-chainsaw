@@ -37,6 +37,12 @@ FONTS_DIR: str = os.environ.get("FONTS_DIR", "fonts")   # per-user custom fonts
 # ----- SQLite database path -----
 DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "bot_data.db")
 
+# ----- Local Telegram Bot API server -----
+# Set LOCAL_API_SERVER to the base URL of your local Telegram Bot API server
+# (e.g. "http://localhost:8081") to lift the 20 MB download restriction and
+# allow files up to 2000 MB.  Leave empty to use the standard cloud API.
+LOCAL_API_SERVER: str = os.environ.get("LOCAL_API_SERVER", "").rstrip("/")
+
 # ----- File size & splitting -----
 # Files larger than SPLIT_THRESHOLD_MB will be split into multiple parts.
 # For the standard Telegram Bot API the practical send limit is ~2000 MB.
@@ -45,9 +51,10 @@ SPLIT_THRESHOLD_MB: int = int(os.environ.get("SPLIT_THRESHOLD_MB", "2000"))
 # Size of each split part (should be ≤ SPLIT_THRESHOLD_MB)
 SPLIT_PART_SIZE_MB: int = int(os.environ.get("SPLIT_PART_SIZE_MB", "1950"))
 # Maximum file size that the Telegram Bot API allows downloading via getFile().
-# The standard Bot API hard limit is 20 MB; raise this only when using a local
-# Bot API server that supports larger downloads.
-MAX_DOWNLOAD_SIZE_MB: int = int(os.environ.get("MAX_DOWNLOAD_SIZE_MB", "20"))
+# Defaults to 20 MB for the standard cloud API, or 2000 MB when a local Bot
+# API server is configured (LOCAL_API_SERVER).  Override via MAX_DOWNLOAD_SIZE_MB.
+_default_max_dl: str = "2000" if LOCAL_API_SERVER else "20"
+MAX_DOWNLOAD_SIZE_MB: int = int(os.environ.get("MAX_DOWNLOAD_SIZE_MB", _default_max_dl))
 
 # ----- Ab Bots branding -----
 BOT_BRAND: str = "⚡ Ab Bots"
