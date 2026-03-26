@@ -135,8 +135,22 @@ def tg_log(level: str, message: str, update: Update, **kw) -> None:
 
 # ── File download ──────────────────────────────────────────────────────────────
 
-async def download_tg_file(bot, file_id: str, dest: str) -> None:
-    """Download any Telegram file to *dest*."""
+async def download_tg_file(bot, file_id: str, dest: str,
+                           file_size: int | None = None) -> None:
+    """Download any Telegram file to *dest*.
+
+    *file_size* (bytes) is optional.  When provided the function rejects files
+    that exceed ``config.MAX_DOWNLOAD_SIZE_MB`` before even contacting the API,
+    giving the user a clear error instead of a cryptic 400 Bad Request.
+    """
+    limit_bytes = config.MAX_DOWNLOAD_SIZE_MB * 1024 * 1024
+    if file_size is not None and file_size > limit_bytes:
+        raise ValueError(
+            f"File is too large ({fmt_size(file_size)}).  "
+            f"The Telegram Bot API only supports downloading files up to "
+            f"{config.MAX_DOWNLOAD_SIZE_MB} MB.  "
+            f"Please compress or split the file before sending."
+        )
     tg_file = await bot.get_file(file_id)
     await tg_file.download_to_drive(dest)
 
@@ -148,7 +162,7 @@ async def download_video(
     """
     Download a video from the message.
     Returns (file_id, local_path, original_name).
-    Raises ValueError for non-video messages.
+    Raises ValueError for non-video messages or oversized files.
     """
     msg = update.message
     if msg.video:
@@ -163,7 +177,8 @@ async def download_video(
         raise ValueError("Not a recognised video file.")
 
     file_id = tg_file.file_id
+    file_size = getattr(tg_file, "file_size", None)
     dest = os.path.join(config.DOWNLOAD_DIR,
                         f"{update.effective_user.id}_{original_name}")
-    await download_tg_file(context.bot, file_id, dest)
+    await download_tg_file(context.bot, file_id, dest, file_size=file_size)
     return file_id, dest, original_name
