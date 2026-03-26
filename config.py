@@ -44,6 +44,10 @@ DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "bot_data.db")
 SPLIT_THRESHOLD_MB: int = int(os.environ.get("SPLIT_THRESHOLD_MB", "2000"))
 # Size of each split part (should be ≤ SPLIT_THRESHOLD_MB)
 SPLIT_PART_SIZE_MB: int = int(os.environ.get("SPLIT_PART_SIZE_MB", "1950"))
+# Maximum file size that the Telegram Bot API allows downloading via getFile().
+# The standard Bot API hard limit is 20 MB; raise this only when using a local
+# Bot API server that supports larger downloads.
+MAX_DOWNLOAD_SIZE_MB: int = int(os.environ.get("MAX_DOWNLOAD_SIZE_MB", "20"))
 
 # ----- Ab Bots branding -----
 BOT_BRAND: str = "⚡ Ab Bots"
