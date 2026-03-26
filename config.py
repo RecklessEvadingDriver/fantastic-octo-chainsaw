@@ -5,6 +5,10 @@ All values can be overridden through environment variables for Heroku deployment
 """
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # ----- Required -----
 BOT_TOKEN: str = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 
