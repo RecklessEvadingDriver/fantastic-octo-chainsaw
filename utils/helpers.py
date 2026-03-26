@@ -145,11 +145,19 @@ async def download_tg_file(bot, file_id: str, dest: str,
     """
     limit_bytes = config.MAX_DOWNLOAD_SIZE_MB * 1024 * 1024
     if file_size is not None and file_size > limit_bytes:
+        if config.LOCAL_API_SERVER:
+            hint = "Please compress or split the file before sending."
+        else:
+            hint = (
+                f"The standard Telegram Bot API only supports downloading files "
+                f"up to {config.MAX_DOWNLOAD_SIZE_MB} MB. "
+                f"Please compress or split the file to under "
+                f"{config.MAX_DOWNLOAD_SIZE_MB} MB before sending, or ask the "
+                f"bot administrator to configure a local Bot API server to lift "
+                f"this restriction."
+            )
         raise ValueError(
-            f"File is too large ({fmt_size(file_size)}).  "
-            f"The Telegram Bot API only supports downloading files up to "
-            f"{config.MAX_DOWNLOAD_SIZE_MB} MB.  "
-            f"Please compress or split the file before sending."
+            f"File is too large ({fmt_size(file_size)}).  {hint}"
         )
     tg_file = await bot.get_file(file_id)
     await tg_file.download_to_drive(dest)

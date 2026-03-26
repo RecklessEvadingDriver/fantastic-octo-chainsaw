@@ -52,12 +52,16 @@ WEBHOOK_URL: str = os.environ.get("WEBHOOK_URL", "").rstrip("/")
 PORT: int = int(os.environ.get("PORT", "8443"))
 
 # ----- File size & splitting -----
-# Files larger than SPLIT_THRESHOLD_MB will be split into multiple parts.
-# For the standard Telegram Bot API the practical send limit is ~2000 MB.
-# With a local Bot API server this can be raised to ~4000 MB.
-SPLIT_THRESHOLD_MB: int = int(os.environ.get("SPLIT_THRESHOLD_MB", "2000"))
-# Size of each split part (should be ≤ SPLIT_THRESHOLD_MB)
-SPLIT_PART_SIZE_MB: int = int(os.environ.get("SPLIT_PART_SIZE_MB", "1950"))
+# Files larger than SPLIT_THRESHOLD_MB will be split into multiple parts before
+# being sent back to the user.
+# Standard Telegram Bot API: sendDocument supports up to 50 MB, so we split
+# at 49 MB to stay safely within the limit.
+# Local Bot API server: supports up to ~2000 MB per file.
+_default_split_threshold: str = "2000" if LOCAL_API_SERVER else "49"
+SPLIT_THRESHOLD_MB: int = int(os.environ.get("SPLIT_THRESHOLD_MB", _default_split_threshold))
+# Size of each split part (should be < SPLIT_THRESHOLD_MB)
+_default_split_part: str = "1950" if LOCAL_API_SERVER else "45"
+SPLIT_PART_SIZE_MB: int = int(os.environ.get("SPLIT_PART_SIZE_MB", _default_split_part))
 # Maximum file size that the Telegram Bot API allows downloading via getFile().
 # Defaults to 20 MB for the standard cloud API, or 2000 MB when a local Bot
 # API server is configured (LOCAL_API_SERVER).  Override via MAX_DOWNLOAD_SIZE_MB.
