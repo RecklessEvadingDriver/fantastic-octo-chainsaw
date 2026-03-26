@@ -33,6 +33,9 @@ import os
 from pyrogram import Client, filters, idle
 from pyrogram.handlers import CallbackQueryHandler, MessageHandler
 
+# pyrogram 2.0.x does not expose filters.edited; build the equivalent manually.
+edited = filters.create(lambda _, __, m: bool(getattr(m, "edit_date", None)))
+
 import config
 import database as db
 import tg_logger as tgl
@@ -68,57 +71,57 @@ def _register_handlers(app: Client) -> None:
 
     # ── User commands ──────────────────────────────────────────────────────────
     app.add_handler(MessageHandler(
-        cmd_start, filters.command(["start", "help"]) & ~filters.edited,
+        cmd_start, filters.command(["start", "help"]) & ~edited,
     ))
     app.add_handler(MessageHandler(
-        cmd_settings, filters.command("settings") & ~filters.edited,
+        cmd_settings, filters.command("settings") & ~edited,
     ))
     app.add_handler(MessageHandler(
-        cmd_setcrf, filters.command("setcrf") & ~filters.edited,
+        cmd_setcrf, filters.command("setcrf") & ~edited,
     ))
     app.add_handler(MessageHandler(
-        cmd_setres, filters.command("setres") & ~filters.edited,
+        cmd_setres, filters.command("setres") & ~edited,
     ))
     app.add_handler(MessageHandler(
-        cmd_setfont, filters.command("setfont") & ~filters.edited,
+        cmd_setfont, filters.command("setfont") & ~edited,
     ))
     app.add_handler(MessageHandler(
-        cmd_clearfont, filters.command("clearfont") & ~filters.edited,
+        cmd_clearfont, filters.command("clearfont") & ~edited,
     ))
 
     # ── Admin commands ─────────────────────────────────────────────────────────
     app.add_handler(MessageHandler(
-        cmd_setforcejoin, filters.command("setforcejoin") & ~filters.edited,
+        cmd_setforcejoin, filters.command("setforcejoin") & ~edited,
     ))
     app.add_handler(MessageHandler(
-        cmd_removeforcejoin, filters.command("removeforcejoin") & ~filters.edited,
+        cmd_removeforcejoin, filters.command("removeforcejoin") & ~edited,
     ))
     app.add_handler(MessageHandler(
-        cmd_addpremium, filters.command("addpremium") & ~filters.edited,
+        cmd_addpremium, filters.command("addpremium") & ~edited,
     ))
     app.add_handler(MessageHandler(
-        cmd_removepremium, filters.command("removepremium") & ~filters.edited,
+        cmd_removepremium, filters.command("removepremium") & ~edited,
     ))
     app.add_handler(MessageHandler(
-        cmd_listpremium, filters.command("listpremium") & ~filters.edited,
+        cmd_listpremium, filters.command("listpremium") & ~edited,
     ))
     app.add_handler(MessageHandler(
-        cmd_stats, filters.command("stats") & ~filters.edited,
+        cmd_stats, filters.command("stats") & ~edited,
     ))
     app.add_handler(MessageHandler(
-        cmd_broadcast, filters.command("broadcast") & ~filters.edited,
+        cmd_broadcast, filters.command("broadcast") & ~edited,
     ))
 
     # ── File uploads (video, documents, audio) ─────────────────────────────────
     app.add_handler(MessageHandler(
         handle_file,
-        (filters.video | filters.document | filters.audio) & ~filters.edited,
+        (filters.video | filters.document | filters.audio) & ~edited,
     ))
 
     # ── Plain text (rename, trim input) ────────────────────────────────────────
     app.add_handler(MessageHandler(
         handle_text,
-        filters.text & ~filters.command & ~filters.edited,
+        filters.text & ~filters.command & ~edited,
     ))
 
     # ── Inline button callbacks ────────────────────────────────────────────────
