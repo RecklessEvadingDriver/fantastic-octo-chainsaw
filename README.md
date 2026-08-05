@@ -88,6 +88,22 @@ utils/
 
 ---
 
+
+## 🛡️ Safety & Refusal Behavior
+
+This assistant must refuse requests for harmful or illegal activity, including:
+- cyber-attacks or unauthorized access,
+- financial sabotage or market manipulation,
+- biological harm, and
+- other violent or illegal actions.
+
+When refusing, it should redirect to safe alternatives, such as:
+- defensive cybersecurity guidance,
+- educational explanations,
+- fiction/world-building writing help, or
+- safe and lawful coding assistance.
+
+---
 ## 🚀 Heroku Deployment
 
 1. Add buildpacks:
